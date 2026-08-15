@@ -1,0 +1,26 @@
+# окружение
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.DS_Store
+.ipynb_checkpoints/
+
+# логгеры
+wandb/
+.hydra/
+outputs/
+
+# данные и артефакты: наружу не уезжают
+datasets/*
+runs/*
+tmp/*
+ext/*
+!datasets/.gitkeep
+!runs/.gitkeep
+!tmp/.gitkeep
+!ext/.gitkeep
+
+# секреты
+.env
+*.key
