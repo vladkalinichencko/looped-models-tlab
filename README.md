@@ -24,3 +24,9 @@ python train.py --tag loop4 --n-loops 4 --tokens 100000000
 ```bash
 python eval.py runs/loop4/ckpt.pt --loops 1 2 4 8 16 32
 ```
+
+Метрики — в локальный MLflow (`sqlite:///mlflow.db`):
+
+```bash
+mlflow ui --backend-store-uri sqlite:///mlflow.db
+```

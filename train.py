@@ -10,9 +10,11 @@ scheme is supposed to be the only difference.
 import argparse
 import json
 import math
+import os
 import pathlib
 import time
 
+import mlflow
 import torch
 
 import data
@@ -87,6 +89,12 @@ def main():
     if total > 10e6:
         print("!! over the 10M budget on the total-parameter reading — see NOTES")
 
+    mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db"))
+    mlflow.set_experiment("looped-models")
+    mlflow.start_run(run_name=args.tag)
+    mlflow.log_params(vars(args))
+    mlflow.log_params({"params_total": total, "params_non_embedding": non_emb})
+
     val, train = data.split(tok, args.seq_len, args.batch_size, args.val_batches, device)
 
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.95),
@@ -116,12 +124,14 @@ def main():
             seen = step * tokens_per_step
             print(f"step {step:>6}/{total_steps}  tok {seen/1e6:6.1f}M  "
                   f"loss {loss.item():.4f}  {time.time()-t0:.0f}s")
+            mlflow.log_metrics({"train_loss": loss.item(), "tokens": seen}, step=step)
 
         if (step and step % args.eval_every == 0) or step == total_steps - 1:
             vl = evaluate(model, val)
             history.append({"step": step, "tokens": step * tokens_per_step,
                             "val_loss": vl, "val_ppl": math.exp(vl)})
             print(f"  val loss {vl:.4f}  ppl {math.exp(vl):.2f}")
+            mlflow.log_metrics({"val_loss": vl, "val_ppl": math.exp(vl)}, step=step)
             if vl < best:
                 best = vl
                 torch.save({"cfg": cfg.__dict__, "model": model.state_dict(),
@@ -129,6 +139,10 @@ def main():
                            out / "ckpt.pt")
 
     best_ppl = math.exp(best) if history else None
+    if history:
+        mlflow.log_metrics({"best_val_loss": best, "best_val_ppl": best_ppl})
+    mlflow.end_run()
+
     (out / "history.json").write_text(json.dumps(
         {"config": vars(args), "params": {"total": total, "non_embedding": non_emb},
          "best_val_loss": best if history else None, "best_val_ppl": best_ppl,

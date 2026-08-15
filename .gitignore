@@ -24,3 +24,8 @@ ext/*
 # секреты
 .env
 *.key
+
+# mlflow (локальный трекинг)
+mlflow.db
+mlruns/
+mlartifacts/
