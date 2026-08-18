@@ -65,6 +65,9 @@ def main():
     p.add_argument("--grad-clip", type=float, default=1.0)
     p.add_argument("--val-batches", type=int, default=20)
     p.add_argument("--eval-every", type=int, default=500)
+    p.add_argument("--save-every", type=int, default=0,
+                   help="сохранять чекпойнт каждые N шагов (0 = только лучший); "
+                        "нужно, чтобы смотреть диагностику в динамике обучения")
     p.add_argument("--log-every", type=int, default=50)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="auto")
@@ -135,11 +138,13 @@ def main():
                             "val_loss": vl, "val_ppl": math.exp(vl)})
             print(f"  val loss {vl:.4f}  ppl {math.exp(vl):.2f}")
             mlflow.log_metrics({"val_loss": vl, "val_ppl": math.exp(vl)}, step=step)
+            blob = {"cfg": cfg.__dict__, "model": model.state_dict(),
+                    "step": step, "val_loss": vl, "tokenizer": args.tokenizer}
             if vl < best:
                 best = vl
-                torch.save({"cfg": cfg.__dict__, "model": model.state_dict(),
-                            "step": step, "val_loss": vl, "tokenizer": args.tokenizer},
-                           out / "ckpt.pt")
+                torch.save(blob, out / "ckpt.pt")
+            if args.save_every and step % args.save_every == 0:
+                torch.save(blob, out / f"ckpt_step{step:06d}.pt")
 
     best_ppl = math.exp(best) if history else None
     if history:
