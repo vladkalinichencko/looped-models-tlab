@@ -23,6 +23,7 @@ class Config:
     rope_theta: float = 10000.0
     tie_embeddings: bool = True
     loop_norm: bool = False  # нормализовать h после каждого лупа (см. NOTES: рост нормы)
+    input_injection: bool = False  # подмешивать эмбеддинги на каждом лупе (Huginn)
 
 
 class RMSNorm(nn.Module):
@@ -120,10 +121,16 @@ class LoopedLM(nn.Module):
     def forward(self, idx, targets=None, n_loops=None):
         cos, sin = rope_cache(idx.shape[1], self.cfg.d_model // self.cfg.n_heads,
                               self.cfg.rope_theta, idx.device)
-        h = self.embed(idx)
+        h0 = self.embed(idx)
+        h = h0
         for _ in range(n_loops or self.cfg.n_loops):
+            # диагностика показала косинус 0.99 между соседними шагами: блок каждый раз
+            # толкает состояние туда же. Инъекция входа даёт лупу опору, которая не
+            # уезжает вместе с h, и должна сбить эту коллинеарность.
+            step_in = h + h0 if self.cfg.input_injection else h
             for block in self.blocks:
-                h = block(h, cos, sin)
+                step_in = block(step_in, cos, sin)
+            h = step_in
             if self.loop_norm is not None:
                 h = self.loop_norm(h)
         logits = self.lm_head(self.norm(h))
