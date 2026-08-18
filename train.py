@@ -54,6 +54,8 @@ def main():
     p.add_argument("--d-model", type=int, default=256)
     p.add_argument("--n-heads", type=int, default=8)
     p.add_argument("--d-ff", type=int, default=704)
+    p.add_argument("--loop-norm", action="store_true",
+                   help="нормализовать h после каждого лупа")
     p.add_argument("--seq-len", type=int, default=512)
     p.add_argument("--batch-size", type=int, default=16)
     p.add_argument("--lr", type=float, default=3e-3)
@@ -82,6 +84,7 @@ def main():
         n_loops=args.n_loops,
         d_ff=args.d_ff,
         max_seq=args.seq_len,
+        loop_norm=args.loop_norm,
     )
     model = LoopedLM(cfg).to(device)
     total, non_emb = model.n_params()

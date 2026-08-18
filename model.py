@@ -22,6 +22,7 @@ class Config:
     max_seq: int = 512
     rope_theta: float = 10000.0
     tie_embeddings: bool = True
+    loop_norm: bool = False  # нормализовать h после каждого лупа (см. NOTES: рост нормы)
 
 
 class RMSNorm(nn.Module):
@@ -105,6 +106,7 @@ class LoopedLM(nn.Module):
         self.embed = nn.Embedding(cfg.vocab_size, cfg.d_model)
         self.blocks = nn.ModuleList([Block(cfg) for _ in range(cfg.n_layers)])
         self.norm = RMSNorm(cfg.d_model)
+        self.loop_norm = RMSNorm(cfg.d_model) if cfg.loop_norm else None
         self.lm_head = nn.Linear(cfg.d_model, cfg.vocab_size, bias=False)
         if cfg.tie_embeddings:
             self.lm_head.weight = self.embed.weight
@@ -122,6 +124,8 @@ class LoopedLM(nn.Module):
         for _ in range(n_loops or self.cfg.n_loops):
             for block in self.blocks:
                 h = block(h, cos, sin)
+            if self.loop_norm is not None:
+                h = self.loop_norm(h)
         logits = self.lm_head(self.norm(h))
         if targets is None:
             return logits, None
