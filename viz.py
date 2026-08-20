@@ -107,6 +107,75 @@ const runs = Object.keys(DATA.runs);
   app.appendChild(t);
 }
 
+// --- 1b. архитектура прогона, из конфига
+{
+  app.appendChild(el("h2", {}, ["Архитектура"]));
+  app.appendChild(el("p", {class: "note"}, ["Рисуется из конфига прогона, а не из "
+    + "отдельной картинки, поэтому не может разойтись с кодом. Числа в скобках — "
+    + "параметры блока."]));
+  const sel = el("select", {}, runs.map(r => el("option", {}, [r])));
+  app.appendChild(el("div", {class: "ctl"}, [sel]));
+  const box = el("div", {});
+  app.appendChild(box);
+
+  function arch() {
+    const c = DATA.runs[sel.value].config;
+    const d = c.d_model, ff = c.d_ff, V = DATA.runs[sel.value].vocab_size || 16384;
+    const hd = d / c.n_heads;
+    const plan = DATA.runs[sel.value].plan;
+    const W = 900, rowH = 26;
+    const rows = [];
+    const push = (t, sub, note, ind) => rows.push([t, sub, note, ind || 0]);
+    push("idx", "(B, S) int64", "токены", 0);
+    push("Embedding", V + " × " + d, (V * d / 1e6).toFixed(2) + "M, связаны с lm_head", 0);
+    push("h₀", "(B, S, " + d + ")", "поток невязки", 0);
+    plan.forEach((step, t) => {
+      const pre = [];
+      if (c.input_injection) pre.push("h ← h + h₀");
+      if (c.step_cond) pre.push("h ← h + step_emb[" + t + "]");
+      if (pre.length) push("инъекция", pre.join(", "), "", 1);
+      push("шаг " + (t + 1), "блоки " + step.map(i => "f" + i).join(" → "), "", 1);
+      if (c.loop_norm) push("RMSNorm", "(" + d + ")", "между лупами", 1);
+    });
+    push("RMSNorm", "(" + d + ")", "", 0);
+    push("lm_head", d + " × " + V, "веса общие с Embedding", 0);
+    push("logits", "(B, S, " + V + ")", "", 0);
+
+    const g = el("svg", {width: W, height: rows.length * rowH + 20});
+    rows.forEach(([t, sub, note, ind], i) => {
+      const y = 10 + i * rowH, x = 20 + ind * 26;
+      g.appendChild(el("rect", {x: x, y: y, width: 200, height: 20, rx: 4,
+        fill: ind ? "none" : "var(--line)", stroke: "var(--line)"}));
+      g.appendChild(el("text", {x: x + 8, y: y + 14, class: "tick",
+        style: "font-size:12px; fill:var(--fg)"}, [t]));
+      g.appendChild(el("text", {x: x + 215, y: y + 14, class: "tick"}, [sub]));
+      g.appendChild(el("text", {x: x + 430, y: y + 14, class: "tick"}, [note]));
+      if (i) g.appendChild(el("line", {x1: x + 10, y1: y, x2: x + 10, y2: y - 6, class: "ax"}));
+    });
+    box.textContent = "";
+    box.appendChild(el("div", {class: "card"}, [g]));
+
+    const blk = el("table", {}, [el("tr", {}, ["часть", "форма", "параметров"].map(h => el("th", {}, [h])))]);
+    const parts = [["RMSNorm ×2", "(" + d + ")", 2 * d],
+      ["Attention qkv", d + " → " + 3 * d, 3 * d * d],
+      ["Attention proj", d + " → " + d, d * d],
+      ["QK-norm", "(" + hd + ") ×2", 2 * hd],
+      ["SwiGLU gate/up", d + " → " + ff + " ×2", 2 * d * ff],
+      ["SwiGLU down", ff + " → " + d, ff * d]];
+    let tot = 0;
+    for (const [n, sh, np] of parts) {
+      tot += np;
+      blk.appendChild(el("tr", {}, [n, sh, np.toLocaleString("ru")].map(v => el("td", {}, [v]))));
+    }
+    blk.appendChild(el("tr", {}, ["один блок f", "", tot.toLocaleString("ru")].map(v => el("td", {}, [el("b", {}, [v])]))));
+    blk.appendChild(el("tr", {}, ["× " + c.n_layers + " блоков", "",
+      (tot * c.n_layers).toLocaleString("ru")].map(v => el("td", {}, [v]))));
+    box.appendChild(blk);
+  }
+  sel.onchange = arch;
+  arch();
+}
+
 // --- 2. кривые обучения
 {
   app.appendChild(el("h2", {}, ["Обучение при равном бюджете токенов"]));
@@ -183,14 +252,20 @@ const runs = Object.keys(DATA.runs);
 
 
 def collect(root):
+    from model import loop_plan
+
     runs = {}
     for path in sorted(pathlib.Path(root).glob("*/history.json")):
         blob = json.loads(path.read_text())
+        cfg = blob["config"]
         diag = []
         jsonl = path.parent / "diag.jsonl"
         if jsonl.exists():
             diag = [json.loads(line) for line in jsonl.read_text().splitlines() if line.strip()]
-        runs[path.parent.name] = {**blob, "diag": diag}
+        plan = loop_plan(cfg["n_layers"], cfg["n_loops"],
+                         cfg.get("loop_scheme", "stack"), cfg.get("group_size", 2))
+        vocab = round(blob["params"]["total"] - blob["params"]["non_embedding"]) // cfg["d_model"]
+        runs[path.parent.name] = {**blob, "diag": diag, "plan": plan, "vocab_size": vocab}
     return {"runs": runs}
 
 
