@@ -150,10 +150,15 @@ class LoopedLM(nn.Module):
         self.norm = RMSNorm(cfg.d_model, cfg.rms_norm_eps)
         self.loop_norm = RMSNorm(cfg.d_model, cfg.rms_norm_eps) if cfg.loop_norm else None
         self.step_emb = nn.Embedding(len(self.plan(cfg.n_loops)), cfg.d_model) if cfg.step_cond else None
-        # голова остановки смотрит на состояние, голова прогресса — на состояние и на
-        # то, куда его только что сдвинули: PALBERT показывает, что динамика говорит
-        # о пользе следующего шага больше, чем само состояние
-        self.exit_head = nn.Linear(cfg.d_model, 1) if cfg.early_exit else None
+        # PALBERT: lambda-слой это трёхслойный MLP с tanh, и на вход ему идёт пара
+        # соседних состояний [h_i, h_{i-1}], а не одно текущее
+        self.exit_head = nn.Sequential(
+            nn.Linear(2 * cfg.d_model, cfg.d_model), nn.Tanh(),
+            nn.Linear(cfg.d_model, cfg.d_model), nn.Tanh(),
+            nn.Linear(cfg.d_model, 1)) if cfg.early_exit else None
+        # голова прогресса — не из PALBERT: там lambda предсказывает вероятность
+        # остановки. Это развитие их наблюдения, что голове полезна динамика состояния,
+        # а не только само состояние: предсказываем, сколько лосса снимет следующий шаг
         self.progress = nn.Sequential(nn.Linear(2 * cfg.d_model, cfg.d_model), nn.SiLU(),
                                       nn.Linear(cfg.d_model, 1)) if cfg.progress_head else None
         self.lm_head = nn.Linear(cfg.d_model, cfg.vocab_size, bias=False)
@@ -250,7 +255,9 @@ class LoopedLM(nn.Module):
         регуляризуют: у PonderNet KL к геометрическому приору, у Ouro энтропия самого
         распределения. Возвращаем q, а вид регуляризатора выбирает train.py.
         """
-        lam = torch.sigmoid(torch.cat([self.exit_head(h) for h in states[1:]], dim=-1))
+        lam = torch.sigmoid(torch.cat(
+            [self.exit_head(torch.cat([states[t + 1], states[t]], dim=-1))
+             for t in range(len(states) - 1)], dim=-1))
         keep = torch.cumprod(1 - lam, dim=-1)
         q = torch.cat([lam[..., :1], lam[..., 1:] * keep[..., :-1]], dim=-1)
         return q / q.sum(-1, keepdim=True).clamp_min(1e-9)
@@ -262,7 +269,7 @@ class LoopedLM(nn.Module):
 
     def forward(self, idx, targets=None, n_loops=None, exit_threshold=None, exit_kl=None,
                 backprop_last=0):
-        h, prev, cdf = None, None, 0.0
+        h, prev, cdf, prev_state = None, None, 0.0, None
         for t, h in enumerate(self.trace(idx, n_loops, backprop_last)):
             # ранний выход на инференсе. Huginn обходится без обучаемой головы: выходит,
             # когда предсказание перестаёт меняться, KL между соседними шагами < 5e-4
@@ -275,10 +282,12 @@ class LoopedLM(nn.Module):
             # Ouro выходит по накопленной вероятности остановки, а не по lambda самой
             # по себе: CDF(t) >= q, где CDF складывает вероятности остановиться до t
             if exit_threshold is not None and t and self.exit_head is not None:
-                lam = float(torch.sigmoid(self.exit_head(h)).mean())
+                lam = float(torch.sigmoid(self.exit_head(
+                    torch.cat([h, prev_state], dim=-1))).mean())
                 cdf = 1 - (1 - lam) * (1 - cdf) if t > 1 else lam
                 if cdf >= exit_threshold:
                     break
+            prev_state = h
         logits = self.head(h)
         if targets is None:
             return logits, None

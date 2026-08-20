@@ -110,12 +110,13 @@ def main():
     p.add_argument("--early-exit", choices=["none", "ouro", "pondernet"], default="none",
                    help="ouro — sum q_t L_t - b*H(q), регуляризатор это энтропия самого "
                         "распределения остановки; pondernet — KL к геометрическому приору")
-    p.add_argument("--ponder-beta", type=float, default=0.05,
-                   help="Ouro: 0.1 в начале обучения, 0.05 дальше")
+    p.add_argument("--ponder-beta", type=float, default=0.5,
+                   help="PALBERT фиксирует 0.5; у Ouro 0.1 в начале и 0.05 дальше")
     p.add_argument("--ponder-prior", type=float, default=0.3,
                    help="lambda геометрического приора, только для pondernet")
     p.add_argument("--progress-head", action="store_true",
-                   help="голова PALBERT: предсказывает, сколько лосса снимет следующий шаг")
+                   help="своя голова: предсказывает, сколько лосса снимет следующий шаг. "
+                        "Не PALBERT — там lambda предсказывает вероятность остановки")
     p.add_argument("--progress-beta", type=float, default=0.1)
     p.add_argument("--loop-sampling", choices=["fixed", "uniform", "lognormal"], default="fixed",
                    help="lognormal — распределение Huginn: tau ~ N(log r - s^2/2, s), "
