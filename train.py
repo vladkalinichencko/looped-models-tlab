@@ -138,6 +138,16 @@ def main():
     total_steps = args.tokens // tokens_per_step
     amp = torch.autocast("cuda", dtype=torch.bfloat16) if device == "cuda" else None
 
+    def write_history(best_loss):
+        """Пишется после каждой оценки, а не в конце: иначе runs/<tag>/history.json
+        всю дорогу хранит прошлый прогон под тем же тегом, и отчёт, собранный по ходу,
+        показывает старую архитектуру как текущую."""
+        (out / "history.json").write_text(json.dumps(
+            {"config": vars(args), "params": {"total": total, "non_embedding": non_emb},
+             "best_val_loss": best_loss if history else None,
+             "best_val_ppl": math.exp(best_loss) if history else None,
+             "history": history}, indent=2))
+
     dx, dy = val[0][0][:2], val[0][1][:2]  # фиксированный батч под диагностику
     sx = dx[:, :128]  # для спектрального радиуса хватает короткой последовательности
     diag_log = (out / "diag.jsonl").open("w")
@@ -191,17 +201,14 @@ def main():
                 torch.save(blob, out / "ckpt.pt")
             if args.save_every and step % args.save_every == 0:
                 torch.save(blob, out / f"ckpt_step{step:06d}.pt")
+            write_history(best)
 
     diag_log.close()
     best_ppl = math.exp(best) if history else None
     if history:
         mlflow.log_metrics({"best_val_loss": best, "best_val_ppl": best_ppl})
     mlflow.end_run()
-
-    (out / "history.json").write_text(json.dumps(
-        {"config": vars(args), "params": {"total": total, "non_embedding": non_emb},
-         "best_val_loss": best if history else None, "best_val_ppl": best_ppl,
-         "history": history}, indent=2))
+    write_history(best)
     print(f"best val ppl {best_ppl} -> {out}")
 
 
