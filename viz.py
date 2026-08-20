@@ -260,6 +260,26 @@ const runs = Object.keys(DATA.runs);
           chart([{pts: ovt.map(r => [r.step, r.loss_one])},
                  {pts: ovt.map(r => [r.step, r.loss_two])}], {})));
       }
+      const wp = f.warp;
+      if (wp) {
+        const n = wp.axis.length;
+        for (const key of Object.keys(wp).filter(k => k.startsWith("step")).slice(0, 3)) {
+          const pts = wp[key], lines = [];
+          for (let i = 0; i < n; i++) {
+            lines.push({pts: pts.slice(i * n, i * n + n), w: 1});
+            lines.push({pts: Array.from({length: n}, (_, j) => pts[j * n + i]), w: 1});
+          }
+          box.appendChild(card("деформация плоскости, " + key,
+            "сетка вокруг одной позиции после " + key.slice(4) + " шагов",
+            chart(lines.map(l => ({...l, color: "#2b6cb0"})), {})));
+        }
+        const lines0 = [];
+        for (let i = 0; i < n; i++) {
+          lines0.push({pts: wp.start.slice(i * n, i * n + n), w: 1, color: "#888"});
+          lines0.push({pts: Array.from({length: n}, (_, j) => wp.start[j * n + i]), w: 1, color: "#888"});
+        }
+        box.appendChild(card("исходная сетка", "до применения блока", chart(lines0, {})));
+      }
       for (const [key, title, sub] of [["traj_drift", "траектория вдоль ухода",
           "ось 1 — суммарное смещение, ось 2 — остаток последнего шага"],
           ["traj_pca", "траектория в PCA", "главные компоненты по токенам"]]) {

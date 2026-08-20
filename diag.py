@@ -177,6 +177,48 @@ def drift_traj(states, n_tokens=16):
     return (stack @ torch.stack([u1, u2], dim=1)).tolist()
 
 
+def warp_grid(model, x, pos=None, n=11, span=1.0, steps=3, seq=128):
+    """How the loop deforms a plane of states around one real position.
+
+    The usual picture of "what a nonlinear layer does to space" is a grid pushed
+    through the map. A block here is not a function of one vector — attention couples
+    positions — so the grid is built by perturbing a single position of a real
+    sequence and running the real forward, then projecting that position back onto the
+    same plane. Straight grid lines that stay straight mean the block acts affinely
+    there; curvature is the part a second pass could in principle exploit.
+
+    Plane axes are the drift direction and what is left of the last step after
+    removing it — the same frame as drift_traj, so the two are comparable.
+    """
+    x = x[:1, :seq]
+    with torch.no_grad():
+        states = [h.detach() for h in model.trace(x)]
+    pos = pos if pos is not None else seq - 1
+    h0 = states[0][0, pos]
+    u1 = (states[-1][0, pos] - h0)
+    u1 = u1 / u1.norm().clamp_min(1e-9)
+    last = states[-1][0, pos] - states[-2][0, pos]
+    u2 = last - (last @ u1) * u1
+    u2 = u2 / u2.norm().clamp_min(1e-9)
+    scale = span * float(states[0][0].norm(dim=-1).mean())
+
+    grid = torch.linspace(-1, 1, n)
+    offs = torch.stack([(a * u1 + b * u2) * scale for a in grid for b in grid])
+    batch = states[0].repeat(len(offs), 1, 1)
+    batch[:, pos] = batch[:, pos] + offs
+
+    out = {"axis": grid.tolist(), "start": (offs @ torch.stack([u1, u2], 1)).tolist()}
+    cos, sin = _rope(model, x)
+    with torch.no_grad():
+        h = batch
+        for t, step in enumerate(model.plan(steps)):
+            for i in step:
+                h = model.blocks[i](h, cos, sin)
+            moved = h[:, pos] - states[0][0, pos]
+            out[f"step{t + 1}"] = (moved @ torch.stack([u1, u2], 1)).tolist()
+    return out
+
+
 def one_vs_two(model, x, y, n_loops=None):
     """From one and the same state: one more step against two more steps.
 
@@ -261,7 +303,8 @@ def main():
     out = pathlib.Path(args.out or pathlib.Path(args.ckpt).parent / "diag.json")
     out.write_text(json.dumps({"ckpt": args.ckpt, "cfg": model.cfg.__dict__, "rows": rows,
                                "traj_pca": pca_traj(states), "traj_drift": drift_traj(states),
-                               "one_vs_two": one_vs_two(model, *val[0], args.loops)}, indent=2))
+                               "one_vs_two": one_vs_two(model, *val[0], args.loops),
+                               "warp": warp_grid(model, val[0][0])}, indent=2))
     print(f"-> {out}")
 
 
