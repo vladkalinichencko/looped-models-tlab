@@ -51,10 +51,14 @@ def objective(model, x, y, args, generator):
     n_loops = None
     if args.loop_sampling == "uniform":
         n_loops = int(torch.randint(1, args.n_loops + 1, (1,), generator=generator).item())
+    elif args.loop_sampling == "lognormal":
+        mu = math.log(args.loop_mean) - args.loop_sigma ** 2 / 2
+        tau = torch.normal(mu, args.loop_sigma, (1,), generator=generator)
+        n_loops = int(torch.poisson(tau.exp(), generator=generator).item()) + 1
     if not (args.deep_supervision or args.early_exit or args.progress_head):
-        return model(x, y, n_loops=n_loops)[1]
+        return model(x, y, n_loops=n_loops, backprop_last=args.backprop_last)[1]
 
-    states, losses = model.walk(x, y, n_loops)
+    states, losses = model.walk(x, y, n_loops, args.backprop_last)
     loss = losses[-1].mean()
     if args.deep_supervision and len(losses) > 1:
         loss = loss + args.deep_supervision * torch.stack(losses[:-1]).mean()
@@ -87,8 +91,9 @@ def main():
     p.add_argument("--d-ff", type=int, default=1152)
     p.add_argument("--loop-scheme", default="stack", choices=["stack", "layer", "group"])
     p.add_argument("--group-size", type=int, default=2)
-    p.add_argument("--input-injection", action="store_true",
-                   help="подмешивать эмбеддинги на каждом лупе")
+    p.add_argument("--input-injection", choices=["none", "add", "concat"], default="none",
+                   help="concat — как в Huginn: состояние склеивается с выходом prelude и "
+                        "сжимается адаптером; add — сложение, упрощение для сравнения")
     p.add_argument("--loop-norm", action="store_true",
                    help="нормализовать h после каждого лупа")
     p.add_argument("--step-cond", action="store_true",
@@ -105,9 +110,17 @@ def main():
     p.add_argument("--progress-head", action="store_true",
                    help="голова PALBERT: предсказывает, сколько лосса снимет следующий шаг")
     p.add_argument("--progress-beta", type=float, default=0.1)
-    p.add_argument("--loop-sampling", choices=["fixed", "uniform"], default="fixed",
-                   help="uniform — случайное число лупов на каждом батче, как в Huginn: "
-                        "модель должна работать на любой глубине, а не только на своей")
+    p.add_argument("--loop-sampling", choices=["fixed", "uniform", "lognormal"], default="fixed",
+                   help="lognormal — распределение Huginn: tau ~ N(log r - s^2/2, s), "
+                        "r ~ Poisson(exp(tau)) + 1. Чаще берёт меньше среднего, но с "
+                        "тяжёлым хвостом, из-за которого модель иногда видит очень много "
+                        "повторов. uniform — упрощение, оставлено для сравнения")
+    p.add_argument("--loop-mean", type=float, default=8.0, help="r с чертой у Huginn")
+    p.add_argument("--loop-sigma", type=float, default=0.5)
+    p.add_argument("--backprop-last", type=int, default=0,
+                   help="усечённый бэкпроп через последние k шагов (Huginn: k=8)")
+    p.add_argument("--n-prelude", type=int, default=0, help="слоёв до цикла, не повторяются")
+    p.add_argument("--n-coda", type=int, default=0, help="слоёв после цикла")
     p.add_argument("--grad-checkpoint", action="store_true",
                    help="пересчитывать активации шага при бэкпропе; нужно при многих лупах")
     p.add_argument("--seq-len", type=int, default=512)
@@ -146,6 +159,8 @@ def main():
         n_kv_heads=args.n_kv_heads,
         head_dim=args.head_dim,
         n_layers=args.n_layers,
+        n_prelude=args.n_prelude,
+        n_coda=args.n_coda,
         n_loops=args.n_loops,
         d_ff=args.d_ff,
         max_seq=args.seq_len,

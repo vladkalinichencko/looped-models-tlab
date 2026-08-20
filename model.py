@@ -34,8 +34,10 @@ class Config:
     tie_embeddings: bool = True
     loop_scheme: str = "stack"  # см. loop_plan
     group_size: int = 2  # размер группы для loop_scheme="group"
+    n_prelude: int = 0  # слоёв до цикла, они не повторяются (Huginn: prelude)
+    n_coda: int = 0  # слоёв после цикла (Huginn: coda)
     loop_norm: bool = False  # нормализовать h после каждого лупа (см. NOTES: рост нормы)
-    input_injection: bool = False  # подмешивать эмбеддинги на каждом лупе (Huginn)
+    input_injection: str = "none"  # none | add | concat — concat это то, что в Huginn
     step_cond: bool = False  # прибавлять эмбеддинг номера шага (Universal Transformers)
     early_exit: bool = False  # голова остановки, PonderNet / Q-exit
     progress_head: bool = False  # голова, предсказывающая пользу следующего лупа (PALBERT)
@@ -138,7 +140,13 @@ class LoopedLM(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.embed = nn.Embedding(cfg.vocab_size, cfg.d_model)
+        self.prelude = nn.ModuleList([Block(cfg) for _ in range(cfg.n_prelude)])
         self.blocks = nn.ModuleList([Block(cfg) for _ in range(cfg.n_layers)])
+        self.coda = nn.ModuleList([Block(cfg) for _ in range(cfg.n_coda)])
+        # Huginn склеивает состояние с эмбеддингом и сжимает адаптером, а не складывает:
+        # у сложения нет способа взвесить одно против другого
+        self.adapter = (nn.Linear(2 * cfg.d_model, cfg.d_model, bias=False)
+                        if cfg.input_injection == "concat" else None)
         self.norm = RMSNorm(cfg.d_model, cfg.rms_norm_eps)
         self.loop_norm = RMSNorm(cfg.d_model, cfg.rms_norm_eps) if cfg.loop_norm else None
         self.step_emb = nn.Embedding(len(self.plan(cfg.n_loops)), cfg.d_model) if cfg.step_cond else None
@@ -171,18 +179,32 @@ class LoopedLM(nn.Module):
         return loop_plan(self.cfg.n_layers, n_loops or self.cfg.n_loops,
                          self.cfg.loop_scheme, self.cfg.group_size)
 
-    def trace(self, idx, n_loops=None):
+    def trace(self, idx, n_loops=None, backprop_last=0):
         """h после эмбеддингов и после каждого шага плана.
 
         Ровно то же вычисление, что и в forward — diag.py считает метрики по этому
         генератору, так что диагностика не может разойтись с обучением.
+
+        backprop_last: усечённый бэкпроп, как в Huginn — градиент течёт только через
+        последние k шагов. Это то, чем 32 повтора вообще делаются обучаемыми: память не
+        растёт с числом повторов. Prelude при этом сигнал получает на каждом шаге, потому
+        что его выход инжектится заново.
         """
+        plan = self.plan(n_loops)
+        detach_before = len(plan) - backprop_last if backprop_last else 0
         cos, sin = rope_cache(idx.shape[1], self.cfg.head_dim,
                               self.cfg.rope_theta, idx.device)
-        h = h0 = self.embed(idx)
+        h = self.embed(idx)
+        for block in self.prelude:
+            h = block(h, cos, sin)
+        h0 = h  # то, что инжектится: выход prelude, а не сами эмбеддинги
         yield h
-        for t, step in enumerate(self.plan(n_loops)):
-            if self.cfg.input_injection:
+        for t, step in enumerate(plan):
+            if t < detach_before:
+                h = h.detach()
+            if self.adapter is not None:
+                h = self.adapter(torch.cat([h, h0], dim=-1))
+            elif self.cfg.input_injection == "add":
                 h = h + h0
             if self.step_emb is not None:
                 h = h + self.step_emb.weight[t]
@@ -201,6 +223,9 @@ class LoopedLM(nn.Module):
             yield h
 
     def head(self, h):
+        for block in self.coda:
+            h = block(h, *rope_cache(h.shape[1], self.cfg.head_dim, self.cfg.rope_theta,
+                                     h.device))
         return self.lm_head(self.norm(h))
 
     def token_loss(self, h, targets):
@@ -209,13 +234,13 @@ class LoopedLM(nn.Module):
         return F.cross_entropy(logits.reshape(-1, logits.size(-1)), targets.reshape(-1),
                                reduction="none").view(targets.shape)
 
-    def walk(self, idx, targets, n_loops=None):
+    def walk(self, idx, targets, n_loops=None, backprop_last=0):
         """Состояния и потокенный лосс на каждом шаге плана.
 
         Всё, чему нужен весь путь, а не только его конец — глубокий надзор, остановка,
         голова прогресса — считается отсюда, чтобы не расходиться с forward.
         """
-        states = list(self.trace(idx, n_loops))
+        states = list(self.trace(idx, n_loops, backprop_last))
         return states, [self.token_loss(h, targets) for h in states[1:]]
 
     def halting(self, states):
@@ -230,10 +255,18 @@ class LoopedLM(nn.Module):
         return torch.cat([self.progress(torch.cat([states[t], states[t + 1] - states[t]], -1))
                           for t in range(len(states) - 1)], dim=-1)
 
-    def forward(self, idx, targets=None, n_loops=None, exit_threshold=None):
-        h = None
-        for t, h in enumerate(self.trace(idx, n_loops)):
-            # ранний выход на инференсе: дальше не идём, если голова уверена, что пора
+    def forward(self, idx, targets=None, n_loops=None, exit_threshold=None, exit_kl=None,
+                backprop_last=0):
+        h, prev = None, None
+        for t, h in enumerate(self.trace(idx, n_loops, backprop_last)):
+            # ранний выход на инференсе. Huginn обходится без обучаемой головы: выходит,
+            # когда предсказание перестаёт меняться, KL между соседними шагами < 5e-4
+            if exit_kl is not None and t:
+                logp = self.head(h).log_softmax(-1)
+                if prev is not None and float(F.kl_div(logp, prev, log_target=True,
+                                                       reduction="batchmean")) < exit_kl:
+                    break
+                prev = logp
             if exit_threshold is not None and t and self.exit_head is not None:
                 if float(torch.sigmoid(self.exit_head(h)).mean()) > exit_threshold:
                     break

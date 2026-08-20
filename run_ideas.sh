@@ -17,7 +17,8 @@ LOOPS="${LOOPS:-4}"
 COMMON=(--tokens "$TOKENS" --n-loops "$LOOPS" --grad-checkpoint --diag-every 100 --eval-every 100)
 
 SELECT=("$@")
-[ ${#SELECT[@]} -eq 0 ] && SELECT=(base layer group inject step norm deep ponder progress uniform)
+[ ${#SELECT[@]} -eq 0 ] && SELECT=(base layer group inject add step norm deep ponder progress
+                                  huginn prelude)
 has () { for w in "${SELECT[@]}"; do [ "$w" = "$1" ] && return 0; done; return 1; }
 
 run () {
@@ -32,10 +33,15 @@ run () {
 has base     && run base
 has layer    && run layer    --loop-scheme layer
 has group    && run group    --loop-scheme group
-has inject   && run inject   --input-injection
+has inject   && run inject   --input-injection concat
+has add      && run add      --input-injection add
 has step     && run step     --step-cond
 has norm     && run norm     --loop-norm
 has deep     && run deep     --deep-supervision 0.3
 has ponder   && run ponder   --early-exit
 has progress && run progress --progress-head
-has uniform  && run uniform  --loop-sampling uniform
+# Huginn целиком: конкатенация с адаптером, лог-нормальное число повторов, усечённый
+# бэкпроп через последние k шагов, prelude и coda вне цикла
+has huginn   && run huginn   --input-injection concat --loop-sampling lognormal \
+  --loop-mean "$LOOPS" --backprop-last 4 --n-layers 2 --n-prelude 1 --n-coda 1
+has prelude  && run prelude  --n-layers 2 --n-prelude 1 --n-coda 1
