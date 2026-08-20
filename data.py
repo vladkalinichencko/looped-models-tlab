@@ -22,20 +22,25 @@ def tokenizer(name):
     return tok
 
 
-def train_tokenizer(out, vocab_size=16384, n_docs=200_000):
-    """Own ByteLevel BPE on FineWeb.
+def train_tokenizer(out, vocab_size=16384, n_docs=200_000, skip=2_000):
+    """Own ByteLevel BPE on FineWeb, starting after the validation region.
 
     Qwen3 ships a 151936-token vocabulary; tied embeddings alone would then be 78M
     parameters at d_model=512, i.e. the whole budget is spent before the first block
     and every step pays for a 152k-wide lm_head. A 16k vocabulary keeps both readings
     of the 10M limit true at once (see NOTES).
+
+    `skip` steps over the head of the stream, which is exactly what `split` hands out
+    as validation. Training the vocabulary on the validation text is a mild leak — it
+    tunes the merges to that text and flatters val perplexity for every variant alike —
+    but it is free to avoid.
     """
     from tokenizers import ByteLevelBPETokenizer
     from transformers import PreTrainedTokenizerFast
 
     ds = load_dataset(DATASET, name=SUBSET, split="train", streaming=True)
     bpe = ByteLevelBPETokenizer()
-    bpe.train_from_iterator((e["text"] for e in itertools.islice(ds, n_docs)),
+    bpe.train_from_iterator((e["text"] for e in itertools.islice(ds, skip, skip + n_docs)),
                             vocab_size=vocab_size, special_tokens=["<|endoftext|>"])
     tok = PreTrainedTokenizerFast(tokenizer_object=bpe, eos_token="<|endoftext|>")
     tok.save_pretrained(out)
@@ -77,6 +82,8 @@ if __name__ == "__main__":
     p.add_argument("out")
     p.add_argument("--vocab-size", type=int, default=16384)
     p.add_argument("--n-docs", type=int, default=200_000)
+    p.add_argument("--skip", type=int, default=2_000,
+                   help="пропустить голову потока — оттуда берётся валидация")
     args = p.parse_args()
-    tok = train_tokenizer(args.out, args.vocab_size, args.n_docs)
+    tok = train_tokenizer(args.out, args.vocab_size, args.n_docs, args.skip)
     print(f"{len(tok)} tokens -> {args.out}")
