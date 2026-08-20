@@ -14,16 +14,31 @@ import torch.nn.functional as F
 @dataclass
 class Config:
     vocab_size: int
-    d_model: int = 256
+    d_model: int = 512
     n_heads: int = 8
-    n_layers: int = 2  # layers inside ONE loop block
+    n_layers: int = 4  # layers inside ONE loop block
     n_loops: int = 4
-    d_ff: int = 704  # ~8/3 * d_model, rounded to a multiple of 64
+    d_ff: int = 896
     max_seq: int = 512
     rope_theta: float = 10000.0
     tie_embeddings: bool = True
+    loop_scheme: str = "stack"  # см. loop_plan
+    group_size: int = 2  # размер группы для loop_scheme="group"
     loop_norm: bool = False  # нормализовать h после каждого лупа (см. NOTES: рост нормы)
     input_injection: bool = False  # подмешивать эмбеддинги на каждом лупе (Huginn)
+    step_cond: bool = False  # прибавлять эмбеддинг номера шага (Universal Transformers)
+
+
+def loop_plan(n_layers, n_loops, scheme="stack", group_size=2):
+    """Порядок применения блоков: список шагов, шаг — список индексов блоков.
+
+    stack — f1 f2 f1 f2 (так делают Huginn и Ouro), layer — f1 f1 f2 f2, group —
+    (f1 f2)(f1 f2)(f3 f4)(f3 f4). Число применений блока одинаково у всех трёх,
+    различается только порядок, так что сравнение схем идёт при равном компьюте.
+    """
+    size = {"stack": n_layers, "layer": 1}.get(scheme, group_size)
+    return [list(range(s, min(s + size, n_layers)))
+            for s in range(0, n_layers, size) for _ in range(n_loops)]
 
 
 class RMSNorm(nn.Module):
@@ -108,32 +123,58 @@ class LoopedLM(nn.Module):
         self.blocks = nn.ModuleList([Block(cfg) for _ in range(cfg.n_layers)])
         self.norm = RMSNorm(cfg.d_model)
         self.loop_norm = RMSNorm(cfg.d_model) if cfg.loop_norm else None
+        self.step_emb = nn.Embedding(len(self.plan(cfg.n_loops)), cfg.d_model) if cfg.step_cond else None
         self.lm_head = nn.Linear(cfg.d_model, cfg.vocab_size, bias=False)
         if cfg.tie_embeddings:
             self.lm_head.weight = self.embed.weight
         self.apply(self._init)
+
+        # GPT-2 residual init, но глубина здесь — число применений блока за проход,
+        # а не число блоков: при 16 лупах в поток невязки пишут 16 раз одни и те же
+        # веса. Без этого ‖h‖ растёт тем сильнее, чем больше лупов, и сравнение
+        # схем превращается в сравнение масштабов активаций.
+        depth = 2 * sum(len(step) for step in self.plan())
+        for block in self.blocks:
+            for w in (block.attn.proj.weight, block.mlp.down.weight):
+                w.data.mul_(depth ** -0.5)
 
     @staticmethod
     def _init(m):
         if isinstance(m, (nn.Linear, nn.Embedding)):
             nn.init.normal_(m.weight, std=0.02)
 
-    def forward(self, idx, targets=None, n_loops=None):
+    def plan(self, n_loops=None):
+        return loop_plan(self.cfg.n_layers, n_loops or self.cfg.n_loops,
+                         self.cfg.loop_scheme, self.cfg.group_size)
+
+    def trace(self, idx, n_loops=None):
+        """h после эмбеддингов и после каждого шага плана.
+
+        Ровно то же вычисление, что и в forward — diag.py считает метрики по этому
+        генератору, так что диагностика не может разойтись с обучением.
+        """
         cos, sin = rope_cache(idx.shape[1], self.cfg.d_model // self.cfg.n_heads,
                               self.cfg.rope_theta, idx.device)
-        h0 = self.embed(idx)
-        h = h0
-        for _ in range(n_loops or self.cfg.n_loops):
-            # диагностика показала косинус 0.99 между соседними шагами: блок каждый раз
-            # толкает состояние туда же. Инъекция входа даёт лупу опору, которая не
-            # уезжает вместе с h, и должна сбить эту коллинеарность.
-            step_in = h + h0 if self.cfg.input_injection else h
-            for block in self.blocks:
-                step_in = block(step_in, cos, sin)
-            h = step_in
+        h = h0 = self.embed(idx)
+        yield h
+        for t, step in enumerate(self.plan(n_loops)):
+            if self.cfg.input_injection:
+                h = h + h0
+            if self.step_emb is not None:
+                h = h + self.step_emb.weight[t]
+            for i in step:
+                h = self.blocks[i](h, cos, sin)
             if self.loop_norm is not None:
                 h = self.loop_norm(h)
-        logits = self.lm_head(self.norm(h))
+            yield h
+
+    def head(self, h):
+        return self.lm_head(self.norm(h))
+
+    def forward(self, idx, targets=None, n_loops=None):
+        for h in self.trace(idx, n_loops):
+            pass
+        logits = self.head(h)
         if targets is None:
             return logits, None
         loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
