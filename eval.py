@@ -10,12 +10,12 @@ stop paying off, and does it ever start hurting?
 import argparse
 import json
 import math
+import os
 import pathlib
 
 import torch
 
-import data
-from model import Config, LoopedLM
+import diag
 from train import evaluate, pick_device
 
 
@@ -29,13 +29,10 @@ def main():
     args = p.parse_args()
 
     device = pick_device(args.device)
-    blob = torch.load(args.ckpt, map_location=device, weights_only=False)
-    cfg = Config(**blob["cfg"])
-    model = LoopedLM(cfg).to(device)
-    model.load_state_dict(blob["model"])
-
-    tok = data.tokenizer(blob["tokenizer"])
-    val, _ = data.split(tok, cfg.max_seq, args.batch_size, args.val_batches, device)
+    model, blob = diag.load(args.ckpt, device)
+    cfg = model.cfg
+    # те же батчи, что и у диагностики, из кэша: иначе каждый эвал заново тянет FineWeb
+    val = diag.val_batches(blob, cfg, args.batch_size, args.val_batches, device)
 
     rows = []
     for n in args.loops or [cfg.n_loops]:
@@ -51,3 +48,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    os._exit(0)
