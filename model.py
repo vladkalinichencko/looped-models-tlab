@@ -27,6 +27,7 @@ class Config:
     loop_norm: bool = False  # нормализовать h после каждого лупа (см. NOTES: рост нормы)
     input_injection: bool = False  # подмешивать эмбеддинги на каждом лупе (Huginn)
     step_cond: bool = False  # прибавлять эмбеддинг номера шага (Universal Transformers)
+    grad_checkpoint: bool = False  # хранить только состояния на границах шагов
 
 
 def loop_plan(n_layers, n_loops, scheme="stack", group_size=2):
@@ -162,8 +163,16 @@ class LoopedLM(nn.Module):
                 h = h + h0
             if self.step_emb is not None:
                 h = h + self.step_emb.weight[t]
-            for i in step:
-                h = self.blocks[i](h, cos, sin)
+
+            def apply(x, step=step):
+                for i in step:
+                    x = self.blocks[i](x, cos, sin)
+                return x
+
+            # активации внутри шага пересчитываются при бэкпропе вместо хранения:
+            # при 16 лупах граф держит 64 применения блока и упирается в память
+            h = (torch.utils.checkpoint.checkpoint(apply, h, use_reentrant=False)
+                 if self.cfg.grad_checkpoint and self.training and h.requires_grad else apply(h))
             if self.loop_norm is not None:
                 h = self.loop_norm(h)
             yield h

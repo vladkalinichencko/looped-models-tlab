@@ -63,6 +63,8 @@ def main():
                    help="нормализовать h после каждого лупа")
     p.add_argument("--step-cond", action="store_true",
                    help="прибавлять эмбеддинг номера шага")
+    p.add_argument("--grad-checkpoint", action="store_true",
+                   help="пересчитывать активации шага при бэкпропе; нужно при многих лупах")
     p.add_argument("--seq-len", type=int, default=512)
     p.add_argument("--batch-size", type=int, default=16)
     p.add_argument("--lr", type=float, default=3e-3)
@@ -102,6 +104,7 @@ def main():
         loop_norm=args.loop_norm,
         input_injection=args.input_injection,
         step_cond=args.step_cond,
+        grad_checkpoint=args.grad_checkpoint,
     )
     model = LoopedLM(cfg).to(device)
     total, non_emb = model.n_params()
