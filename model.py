@@ -244,11 +244,16 @@ class LoopedLM(nn.Module):
         return states, [self.token_loss(h, targets) for h in states[1:]]
 
     def halting(self, states):
-        """PonderNet: lambda_t на каждом шаге -> вероятность остановиться именно на нём."""
+        """lambda_t на каждом шаге -> вероятность остановиться именно на нём.
+
+        Одна и та же конструкция у PonderNet и у Ouro, различается только чем её
+        регуляризуют: у PonderNet KL к геометрическому приору, у Ouro энтропия самого
+        распределения. Возвращаем q, а вид регуляризатора выбирает train.py.
+        """
         lam = torch.sigmoid(torch.cat([self.exit_head(h) for h in states[1:]], dim=-1))
         keep = torch.cumprod(1 - lam, dim=-1)
-        p = torch.cat([lam[..., :1], lam[..., 1:] * keep[..., :-1]], dim=-1)
-        return p / p.sum(-1, keepdim=True).clamp_min(1e-9)
+        q = torch.cat([lam[..., :1], lam[..., 1:] * keep[..., :-1]], dim=-1)
+        return q / q.sum(-1, keepdim=True).clamp_min(1e-9)
 
     def predicted_gain(self, states):
         """Насколько, по мнению головы, следующий шаг уменьшит лосс."""
@@ -257,7 +262,7 @@ class LoopedLM(nn.Module):
 
     def forward(self, idx, targets=None, n_loops=None, exit_threshold=None, exit_kl=None,
                 backprop_last=0):
-        h, prev = None, None
+        h, prev, cdf = None, None, 0.0
         for t, h in enumerate(self.trace(idx, n_loops, backprop_last)):
             # ранний выход на инференсе. Huginn обходится без обучаемой головы: выходит,
             # когда предсказание перестаёт меняться, KL между соседними шагами < 5e-4
@@ -267,8 +272,12 @@ class LoopedLM(nn.Module):
                                                        reduction="batchmean")) < exit_kl:
                     break
                 prev = logp
+            # Ouro выходит по накопленной вероятности остановки, а не по lambda самой
+            # по себе: CDF(t) >= q, где CDF складывает вероятности остановиться до t
             if exit_threshold is not None and t and self.exit_head is not None:
-                if float(torch.sigmoid(self.exit_head(h)).mean()) > exit_threshold:
+                lam = float(torch.sigmoid(self.exit_head(h)).mean())
+                cdf = 1 - (1 - lam) * (1 - cdf) if t > 1 else lam
+                if cdf >= exit_threshold:
                     break
         logits = self.head(h)
         if targets is None:

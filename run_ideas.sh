@@ -17,7 +17,7 @@ LOOPS="${LOOPS:-4}"
 COMMON=(--tokens "$TOKENS" --n-loops "$LOOPS" --grad-checkpoint --diag-every 100 --eval-every 100)
 
 SELECT=("$@")
-[ ${#SELECT[@]} -eq 0 ] && SELECT=(base layer group inject add step norm deep ponder progress
+[ ${#SELECT[@]} -eq 0 ] && SELECT=(base layer group inject add step norm deep ponder ouro progress
                                   huginn prelude)
 has () { for w in "${SELECT[@]}"; do [ "$w" = "$1" ] && return 0; done; return 1; }
 
@@ -38,7 +38,8 @@ has add      && run add      --input-injection add
 has step     && run step     --step-cond
 has norm     && run norm     --loop-norm
 has deep     && run deep     --deep-supervision 0.3
-has ponder   && run ponder   --early-exit
+has ponder   && run ponder   --early-exit pondernet
+has ouro     && run ouro     --early-exit ouro
 has progress && run progress --progress-head
 # Huginn целиком: конкатенация с адаптером, лог-нормальное число повторов, усечённый
 # бэкпроп через последние k шагов, prelude и coda вне цикла

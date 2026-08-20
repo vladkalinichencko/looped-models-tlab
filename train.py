@@ -55,7 +55,7 @@ def objective(model, x, y, args, generator):
         mu = math.log(args.loop_mean) - args.loop_sigma ** 2 / 2
         tau = torch.normal(mu, args.loop_sigma, (1,), generator=generator)
         n_loops = int(torch.poisson(tau.exp(), generator=generator).item()) + 1
-    if not (args.deep_supervision or args.early_exit or args.progress_head):
+    if not (args.deep_supervision or model.exit_head is not None or args.progress_head):
         return model(x, y, n_loops=n_loops, backprop_last=args.backprop_last)[1]
 
     states, losses = model.walk(x, y, n_loops, args.backprop_last)
@@ -63,13 +63,18 @@ def objective(model, x, y, args, generator):
     if args.deep_supervision and len(losses) > 1:
         loss = loss + args.deep_supervision * torch.stack(losses[:-1]).mean()
     if model.exit_head is not None:
-        p = model.halting(states)
-        loss = loss + (p * torch.stack(losses, dim=-1)).sum(-1).mean()
-        steps = torch.arange(p.shape[-1], device=p.device)
-        prior = args.ponder_prior * (1 - args.ponder_prior) ** steps
-        prior = prior / prior.sum()
-        loss = loss + args.ponder_beta * F.kl_div(prior.log().expand_as(p), p,
-                                                  reduction="batchmean")
+        q = model.halting(states)
+        loss = loss + (q * torch.stack(losses, dim=-1)).sum(-1).mean()
+        if args.early_exit == "ouro":
+            # энтропию максимизируем: без неё распределение схлопывается на первом шаге
+            entropy = -(q * q.clamp_min(1e-9).log()).sum(-1).mean()
+            loss = loss - args.ponder_beta * entropy
+        else:
+            steps = torch.arange(q.shape[-1], device=q.device)
+            prior = args.ponder_prior * (1 - args.ponder_prior) ** steps
+            prior = prior / prior.sum()
+            loss = loss + args.ponder_beta * F.kl_div(prior.log().expand_as(q), q,
+                                                      reduction="batchmean")
     if model.progress is not None:
         gain = torch.stack([losses[t] - losses[t + 1] for t in range(len(losses) - 1)], dim=-1)
         pred = model.predicted_gain(states)[..., :gain.shape[-1]]
@@ -102,11 +107,13 @@ def main():
                    help="вес лосса на промежуточных шагах: L_T + b * среднее(L_t). "
                         "Требует, чтобы луп улучшал предсказание, а не только доводил "
                         "до конца — анти-DEQ по смыслу")
-    p.add_argument("--early-exit", action="store_true",
-                   help="голова остановки, лосс PonderNet: sum p_t L_t + b KL(p||Geom)")
-    p.add_argument("--ponder-beta", type=float, default=0.01)
+    p.add_argument("--early-exit", choices=["none", "ouro", "pondernet"], default="none",
+                   help="ouro — sum q_t L_t - b*H(q), регуляризатор это энтропия самого "
+                        "распределения остановки; pondernet — KL к геометрическому приору")
+    p.add_argument("--ponder-beta", type=float, default=0.05,
+                   help="Ouro: 0.1 в начале обучения, 0.05 дальше")
     p.add_argument("--ponder-prior", type=float, default=0.3,
-                   help="lambda геометрического приора: чем больше, тем раньше остановка")
+                   help="lambda геометрического приора, только для pondernet")
     p.add_argument("--progress-head", action="store_true",
                    help="голова PALBERT: предсказывает, сколько лосса снимет следующий шаг")
     p.add_argument("--progress-beta", type=float, default=0.1)
@@ -169,7 +176,7 @@ def main():
         loop_norm=args.loop_norm,
         input_injection=args.input_injection,
         step_cond=args.step_cond,
-        early_exit=args.early_exit,
+        early_exit=args.early_exit != "none",
         progress_head=args.progress_head,
         grad_checkpoint=args.grad_checkpoint,
     )
