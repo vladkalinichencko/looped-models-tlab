@@ -83,7 +83,15 @@ def spectral_by_step(model, x, n_loops=None, iters=8):
     Same power iteration as the CLI, but few iterations and a short sequence: the
     question during training is whether the map is above or below one, not the third
     decimal place.
+
+    Runs on CPU always: MPS has no forward-mode derivative for attention, and the
+    copy of a nine-million-parameter model costs less than losing the metric.
     """
+    if x.device.type != "cpu":
+        cpu = LoopedLM(model.cfg)
+        cpu.load_state_dict({k: v.cpu() for k, v in model.state_dict().items()})
+        cpu.eval()
+        return spectral_by_step(cpu, x.cpu(), n_loops, iters)
     with torch.no_grad():
         states = [h.detach() for h in model.trace(x, n_loops)]
     cos, sin = _rope(model, x)
