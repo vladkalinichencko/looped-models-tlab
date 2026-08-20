@@ -150,6 +150,56 @@ def pca_traj(states, n_tokens=16, k=2):
     return (stack @ v).tolist()
 
 
+def drift_traj(states, n_tokens=16):
+    """Same trajectory, but in the plane the state actually leaves along.
+
+    Principal components are chosen by variance across tokens, which is dominated by
+    what distinguishes tokens from each other, not by what the loops do. Here axis 1
+    is the mean total displacement over the loops and axis 2 is whatever is left of
+    the last step after removing axis 1 — so a straight drift shows up as a straight
+    line and a genuine turn shows up as a turn.
+    """
+    stack = torch.stack([s[0, :n_tokens].float().cpu() for s in states])
+    u1 = (stack[-1] - stack[0]).mean(0)
+    u1 = u1 / u1.norm().clamp_min(1e-9)
+    last = (stack[-1] - stack[-2]).mean(0)
+    u2 = last - (last @ u1) * u1
+    u2 = u2 / u2.norm().clamp_min(1e-9)
+    return (stack @ torch.stack([u1, u2], dim=1)).tolist()
+
+
+def one_vs_two(model, x, y, n_loops=None):
+    """From one and the same state: one more step against two more steps.
+
+    The question the task asks is what a second pass buys. Compare from the same h_t,
+    not from different training runs: how far apart the two displacements point, how
+    far apart the two predictions end up, and which of them has the lower loss.
+    """
+    states = [h.detach() for h in model.trace(x, n_loops)]
+    plan = model.plan(n_loops)
+    cos, sin = _rope(model, x)
+    rows = []
+    for t in range(len(states) - 2):
+        h = states[t]
+        one, two = states[t + 1], states[t + 2]
+        with torch.no_grad():
+            p1 = model.head(one).log_softmax(-1)
+            p2 = model.head(two).log_softmax(-1)
+            d1, d2 = (one - h).reshape(-1, h.shape[-1]), (two - h).reshape(-1, h.shape[-1])
+            rows.append({
+                "step": t,
+                "cos_one_two": float(F.cosine_similarity(d1, d2, dim=-1).mean()),
+                "len_ratio": float(d2.norm() / d1.norm().clamp_min(1e-9)),
+                "kl_one_two": float(F.kl_div(p2, p1, log_target=True, reduction="batchmean")),
+                "loss_one": float(F.cross_entropy(
+                    model.head(one).reshape(-1, p1.shape[-1]), y.reshape(-1))),
+                "loss_two": float(F.cross_entropy(
+                    model.head(two).reshape(-1, p1.shape[-1]), y.reshape(-1))),
+                "top1_agree": float((p1.argmax(-1) == p2.argmax(-1)).float().mean()),
+            })
+    return rows
+
+
 def _rope(model, x):
     from model import rope_cache
     cfg = model.cfg
@@ -200,8 +250,9 @@ def main():
 
     states = [h.detach() for h in model.trace(val[0][0], args.loops)]
     out = pathlib.Path(args.out or pathlib.Path(args.ckpt).parent / "diag.json")
-    out.write_text(json.dumps({"ckpt": args.ckpt, "cfg": model.cfg.__dict__,
-                               "rows": rows, "traj": pca_traj(states)}, indent=2))
+    out.write_text(json.dumps({"ckpt": args.ckpt, "cfg": model.cfg.__dict__, "rows": rows,
+                               "traj_pca": pca_traj(states), "traj_drift": drift_traj(states),
+                               "one_vs_two": one_vs_two(model, *val[0], args.loops)}, indent=2))
     print(f"-> {out}")
 
 
