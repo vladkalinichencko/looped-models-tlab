@@ -58,13 +58,17 @@ def spectral_radius(step, h, iters=20, seed=0):
     state keeps moving. This is the number that decides whether "more loops" is
     even possible, and it costs one JVP per iteration, not a full Jacobian.
     """
+    from torch.nn.attention import SDPBackend, sdpa_kernel
+
     v = torch.randn(h.shape, generator=torch.Generator().manual_seed(seed)).to(h)
     v = v / v.norm()
     lam = 0.0
-    for _ in range(iters):
-        _, jv = torch.func.jvp(step, (h,), (v,))
-        lam = float(jv.norm())
-        v = jv / max(lam, 1e-12)
+    # у flash-ядра внимания нет прямого режима дифференцирования, у математического есть
+    with sdpa_kernel(SDPBackend.MATH):
+        for _ in range(iters):
+            _, jv = torch.func.jvp(step, (h,), (v,))
+            lam = float(jv.norm())
+            v = jv / max(lam, 1e-12)
     return lam
 
 
