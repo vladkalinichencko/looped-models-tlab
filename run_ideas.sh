@@ -23,7 +23,9 @@ has () { for w in "${SELECT[@]}"; do [ "$w" = "$1" ] && return 0; done; return 1
 
 run () {
   local tag="$1"; shift
-  [ -f "runs/idea_${tag}/history.json" ] && { echo "=== idea_${tag}: уже есть"; return; }
+  # по результату, а не по наличию файла: оборванный прогон оставляет частичный
+  # history.json, и следующий запуск молча засчитывает его за готовый
+  grep -q "best val ppl" "tmp/idea_${tag}.log" 2>/dev/null && { echo "=== idea_${tag}: уже есть"; return; }
   echo "=== idea_${tag}"
   .venv/bin/python -u train.py --tag "idea_${tag}" "${COMMON[@]}" "$@" \
     > "tmp/idea_${tag}.log" 2>&1
