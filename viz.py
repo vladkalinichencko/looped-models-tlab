@@ -198,7 +198,8 @@ const runs = Object.keys(DATA.runs);
   const box = el("div", {class: "grid"});
   app.appendChild(box);
 
-  const KEYS = [["rel_step", "‖Δh‖/‖h‖ — сходится ли к неподвижной точке"],
+  const KEYS = [["spectral_radius", "ρ(J) — сжимает шаг или расширяет; ниже 1 есть неподвижная точка"],
+                ["rel_step", "‖Δh‖/‖h‖ — сходится ли к неподвижной точке"],
                 ["cos_prev", "cos(Δh_t, Δh_{t-1}) — новое движение или то же самое"],
                 ["cos_useful", "cos(Δh, −∂L/∂h) — полезен ли шаг"],
                 ["h_norm", "‖h‖ — растёт ли поток невязки"],
