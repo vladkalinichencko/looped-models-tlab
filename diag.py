@@ -38,6 +38,11 @@ def intrinsic_dim(x, n=1024, seed=0):
     Effective rank counts linear directions, this one counts the dimension of the
     curved sheet the states actually lie on — the two disagree exactly when the
     manifold is not a subspace.
+
+    Read it as a lower bound: the points come from a couple of documents, and
+    neighbouring positions inside one document are correlated, which pushes the
+    estimate down. Comparable across loops and across training, not against
+    published numbers for other models.
     """
     flat = x.reshape(-1, x.shape[-1]).float().cpu()
     idx = torch.randperm(flat.shape[0], generator=torch.Generator().manual_seed(seed))[:n]
