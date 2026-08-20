@@ -13,14 +13,24 @@ import torch.nn.functional as F
 
 @dataclass
 class Config:
+    """Qwen3-0.6B ratios, scaled to the parameter budget.
+
+    Kept from the real config: head_dim independent of d_model with n_heads*head_dim
+    = 2*d_model, grouped-query attention at 2:1, d_ff = 3*d_model, rope_theta = 1e6,
+    rms_norm_eps = 1e-6, no biases, tied embeddings. Only the sizes shrink.
+    """
+
     vocab_size: int
-    d_model: int = 512
-    n_heads: int = 8
+    d_model: int = 384
+    n_heads: int = 6
+    n_kv_heads: int = 3
+    head_dim: int = 128
     n_layers: int = 4  # layers inside ONE loop block
     n_loops: int = 4
-    d_ff: int = 896
+    d_ff: int = 1152
     max_seq: int = 512
-    rope_theta: float = 10000.0
+    rope_theta: float = 1000000.0
+    rms_norm_eps: float = 1e-6
     tie_embeddings: bool = True
     loop_scheme: str = "stack"  # см. loop_plan
     group_size: int = 2  # размер группы для loop_scheme="group"
@@ -73,22 +83,27 @@ def apply_rope(x, cos, sin):  # x: (b, h, s, hd)
 
 
 class Attention(nn.Module):
+    """Qwen3 attention: grouped queries, per-head QK-norm, head_dim set independently."""
+
     def __init__(self, cfg: Config):
         super().__init__()
-        self.n_heads = cfg.n_heads
-        self.head_dim = cfg.d_model // cfg.n_heads
-        self.qkv = nn.Linear(cfg.d_model, 3 * cfg.d_model, bias=False)
-        self.proj = nn.Linear(cfg.d_model, cfg.d_model, bias=False)
-        self.q_norm = RMSNorm(self.head_dim)
-        self.k_norm = RMSNorm(self.head_dim)
+        self.n_heads, self.n_kv_heads = cfg.n_heads, cfg.n_kv_heads
+        self.head_dim = cfg.head_dim
+        self.q = nn.Linear(cfg.d_model, cfg.n_heads * cfg.head_dim, bias=False)
+        self.k = nn.Linear(cfg.d_model, cfg.n_kv_heads * cfg.head_dim, bias=False)
+        self.v = nn.Linear(cfg.d_model, cfg.n_kv_heads * cfg.head_dim, bias=False)
+        self.proj = nn.Linear(cfg.n_heads * cfg.head_dim, cfg.d_model, bias=False)
+        self.q_norm = RMSNorm(cfg.head_dim, cfg.rms_norm_eps)
+        self.k_norm = RMSNorm(cfg.head_dim, cfg.rms_norm_eps)
 
     def forward(self, x, cos, sin):
         b, s, _ = x.shape
-        q, k, v = self.qkv(x).chunk(3, dim=-1)
-        q, k, v = (t.view(b, s, self.n_heads, self.head_dim).transpose(1, 2) for t in (q, k, v))
-        q, k = self.q_norm(q), self.k_norm(k)
+        q = self.q_norm(self.q(x).view(b, s, self.n_heads, self.head_dim)).transpose(1, 2)
+        k = self.k_norm(self.k(x).view(b, s, self.n_kv_heads, self.head_dim)).transpose(1, 2)
+        v = self.v(x).view(b, s, self.n_kv_heads, self.head_dim).transpose(1, 2)
         q, k = apply_rope(q, cos, sin), apply_rope(k, cos, sin)
-        o = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        o = F.scaled_dot_product_attention(q, k, v, is_causal=True,
+                                           enable_gqa=self.n_kv_heads != self.n_heads)
         return self.proj(o.transpose(1, 2).reshape(b, s, -1))
 
 
@@ -106,9 +121,9 @@ class MLP(nn.Module):
 class Block(nn.Module):
     def __init__(self, cfg: Config):
         super().__init__()
-        self.attn_norm = RMSNorm(cfg.d_model)
+        self.attn_norm = RMSNorm(cfg.d_model, cfg.rms_norm_eps)
         self.attn = Attention(cfg)
-        self.mlp_norm = RMSNorm(cfg.d_model)
+        self.mlp_norm = RMSNorm(cfg.d_model, cfg.rms_norm_eps)
         self.mlp = MLP(cfg)
 
     def forward(self, x, cos, sin):
@@ -122,8 +137,8 @@ class LoopedLM(nn.Module):
         self.cfg = cfg
         self.embed = nn.Embedding(cfg.vocab_size, cfg.d_model)
         self.blocks = nn.ModuleList([Block(cfg) for _ in range(cfg.n_layers)])
-        self.norm = RMSNorm(cfg.d_model)
-        self.loop_norm = RMSNorm(cfg.d_model) if cfg.loop_norm else None
+        self.norm = RMSNorm(cfg.d_model, cfg.rms_norm_eps)
+        self.loop_norm = RMSNorm(cfg.d_model, cfg.rms_norm_eps) if cfg.loop_norm else None
         self.step_emb = nn.Embedding(len(self.plan(cfg.n_loops)), cfg.d_model) if cfg.step_cond else None
         self.lm_head = nn.Linear(cfg.d_model, cfg.vocab_size, bias=False)
         if cfg.tie_embeddings:
@@ -154,7 +169,7 @@ class LoopedLM(nn.Module):
         Ровно то же вычисление, что и в forward — diag.py считает метрики по этому
         генератору, так что диагностика не может разойтись с обучением.
         """
-        cos, sin = rope_cache(idx.shape[1], self.cfg.d_model // self.cfg.n_heads,
+        cos, sin = rope_cache(idx.shape[1], self.cfg.head_dim,
                               self.cfg.rope_theta, idx.device)
         h = h0 = self.embed(idx)
         yield h

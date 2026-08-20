@@ -72,9 +72,32 @@ def spectral_radius(step, h, iters=20, seed=0):
     with sdpa_kernel(SDPBackend.MATH):
         for _ in range(iters):
             _, jv = torch.func.jvp(step, (h,), (v,))
-            lam = float(jv.norm())
+            lam = float(jv.detach().norm())
             v = jv / max(lam, 1e-12)
     return lam
+
+
+def spectral_by_step(model, x, n_loops=None, iters=8):
+    """rho(J) for every step of the plan, cheap enough to log during training.
+
+    Same power iteration as the CLI, but few iterations and a short sequence: the
+    question during training is whether the map is above or below one, not the third
+    decimal place.
+    """
+    with torch.no_grad():
+        states = [h.detach() for h in model.trace(x, n_loops)]
+    cos, sin = _rope(model, x)
+    out = []
+    for t, step in enumerate(model.plan(n_loops)):
+        blocks = [model.blocks[i] for i in step]
+
+        def apply(h, blocks=blocks):
+            for b in blocks:
+                h = b(h, cos, sin)
+            return h
+
+        out.append(spectral_radius(apply, states[t], iters))
+    return out
 
 
 def loop_rows(model, x, y, n_loops=None, with_spectral=False):
@@ -254,7 +277,7 @@ def one_vs_two(model, x, y, n_loops=None):
 def _rope(model, x):
     from model import rope_cache
     cfg = model.cfg
-    return rope_cache(x.shape[1], cfg.d_model // cfg.n_heads, cfg.rope_theta, x.device)
+    return rope_cache(x.shape[1], cfg.head_dim, cfg.rope_theta, x.device)
 
 
 def load(ckpt, device="cpu"):

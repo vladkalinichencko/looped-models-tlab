@@ -52,9 +52,11 @@ def main():
     p.add_argument("--tokens", type=int, default=100_000_000, help="training token budget")
     p.add_argument("--n-loops", type=int, default=4)
     p.add_argument("--n-layers", type=int, default=4, help="layers inside one loop block")
-    p.add_argument("--d-model", type=int, default=512)
-    p.add_argument("--n-heads", type=int, default=8)
-    p.add_argument("--d-ff", type=int, default=896)
+    p.add_argument("--d-model", type=int, default=384)
+    p.add_argument("--n-heads", type=int, default=6)
+    p.add_argument("--n-kv-heads", type=int, default=3, help="Qwen3: вдвое меньше, чем голов")
+    p.add_argument("--head-dim", type=int, default=128, help="Qwen3 задаёт его независимо от d_model")
+    p.add_argument("--d-ff", type=int, default=1152)
     p.add_argument("--loop-scheme", default="stack", choices=["stack", "layer", "group"])
     p.add_argument("--group-size", type=int, default=2)
     p.add_argument("--input-injection", action="store_true",
@@ -81,6 +83,9 @@ def main():
     p.add_argument("--diag-every", type=int, default=0,
                    help="писать диагностику лупов в runs/<tag>/diag.jsonl каждые N шагов; "
                         "без неё видно только лосс, а не что происходит с состоянием")
+    p.add_argument("--spectral-every", type=int, default=4,
+                   help="считать спектральный радиус каждую N-ю запись диагностики; "
+                        "он требует прямого режима дифференцирования и стоит дороже прочего")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="auto")
     args = p.parse_args()
@@ -95,6 +100,8 @@ def main():
         vocab_size=len(tok),
         d_model=args.d_model,
         n_heads=args.n_heads,
+        n_kv_heads=args.n_kv_heads,
+        head_dim=args.head_dim,
         n_layers=args.n_layers,
         n_loops=args.n_loops,
         d_ff=args.d_ff,
@@ -120,13 +127,19 @@ def main():
 
     val, train = data.split(tok, args.seq_len, args.batch_size, args.val_batches, device)
 
-    opt = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.95),
-                            weight_decay=args.weight_decay)
+    # веса нормализаций одномерные, и распад на них — не регуляризация, а сдвиг
+    # масштаба активаций; в рецептах обучения языковых моделей их всегда исключают
+    decay = [p for p in model.parameters() if p.dim() >= 2]
+    no_decay = [p for p in model.parameters() if p.dim() < 2]
+    opt = torch.optim.AdamW([{"params": decay, "weight_decay": args.weight_decay},
+                             {"params": no_decay, "weight_decay": 0.0}],
+                            lr=args.lr, betas=(0.9, 0.95))
     tokens_per_step = args.batch_size * args.seq_len
     total_steps = args.tokens // tokens_per_step
     amp = torch.autocast("cuda", dtype=torch.bfloat16) if device == "cuda" else None
 
     dx, dy = val[0][0][:2], val[0][1][:2]  # фиксированный батч под диагностику
+    sx = dx[:, :128]  # для спектрального радиуса хватает короткой последовательности
     diag_log = (out / "diag.jsonl").open("w")
 
     best, history, t0 = float("inf"), [], time.time()
@@ -150,6 +163,10 @@ def main():
         if args.diag_every and step % args.diag_every == 0:
             rows = diag.loop_rows(model, dx, dy)
             opt.zero_grad(set_to_none=True)
+            n = step // args.diag_every
+            if args.spectral_every and n % args.spectral_every == 0:
+                for row, rho in zip(rows, diag.spectral_by_step(model, sx)):
+                    row["spectral_radius"] = rho
             diag_log.write(json.dumps({"step": step, "tokens": step * tokens_per_step,
                                        "train_loss": loss.item(), **by_block,
                                        "rows": rows}) + "\n")
