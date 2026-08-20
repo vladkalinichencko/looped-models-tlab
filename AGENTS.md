@@ -12,6 +12,10 @@
 | `data.py` | FineWeb -> паки токенов, детерминированный train/val сплит | да |
 | `train.py` | претрен под фиксированным бюджетом токенов | да |
 | `eval.py` | val ppl чекпойнта, свип по числу лупов | да |
+| `diag.py` | вся диагностика состояния между лупами, чистые функции | да |
+| `viz.py` | `runs/*/*.json` -> одна интерактивная страница | да |
+| `run_sweep.sh` | базовая кривая: одинаковый бюджет, разное число лупов | да |
+| `tokenizers/fineweb16k` | свой BPE, тот же во всех сравнениях | да |
 | `report.md` | финальный отчёт | да |
 | `datasets/` | кэш HF-датасета | нет |
 | `runs/<tag>/` | `ckpt.pt`, `history.json`, `eval.json`, графики | нет |
@@ -25,8 +29,10 @@
   ppl несравнимы, перезапускай всё.
 - Бюджет токенов у всех вариантов одинаковый. Сравнение «лупы vs не лупы» при разном
   числе увиденных токенов ничего не значит.
-- Модификации схемы лупинга — в `model.py`, рядом с `LoopedLM.forward`. Не плоди
-  копии модели: добавляй флаг в `Config`.
+- Модификации схемы лупинга — в `model.py`, рядом с `loop_plan` и `LoopedLM.trace`.
+  Не плоди копии модели: добавляй флаг в `Config`.
+- **Диагностика ходит по `LoopedLM.trace`, а не повторяет цикл руками.** Один раз уже
+  было: скрипт диагностики не знал про `input_injection` и мерил не ту модель.
 - **Граница кода.** Корень — код человека: `model.py`, `data.py`, `train.py`, `eval.py`.
   `tmp/` — территория агента: варианты схем лупинга, одноразовые скрипты, логи, разборы.
   Там можно что угодно, но по-человечески читаемо.
@@ -38,9 +44,13 @@
 
 ```bash
 source .venv/bin/activate
+python data.py tokenizers/fineweb16k                          # разово, если словаря нет
 python train.py --tag smoke --tokens 200000 --eval-every 50   # проверить, что живо
-python train.py --tag loop4 --n-loops 4 --tokens 100000000
-python eval.py runs/loop4/ckpt.pt --loops 1 2 4 8 16 32
+./run_sweep.sh                                                # свип по числу лупов
+python train.py --tag g4 --n-loops 4 --loop-scheme group --tokens 25000000 --diag-every 250
+python eval.py runs/loops4/ckpt.pt --loops 1 2 4 8 16 32
+python diag.py runs/loops4/ckpt.pt --loops 16                 # + спектральный радиус
+python viz.py --only loops1 loops2 loops4 loops8 loops16
 ```
 
 ## Что сдаём
