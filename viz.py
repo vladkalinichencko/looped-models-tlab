@@ -231,6 +231,51 @@ const runs = Object.keys(DATA.runs);
   draw(true);
 }
 
+// --- 3b. готовый чекпойнт: спектральный радиус, один шаг против двух, траектория
+{
+  const withFinal = runs.filter(r => DATA.runs[r].final);
+  if (withFinal.length) {
+    app.appendChild(el("h2", {}, ["Готовый чекпойнт: сжимает ли отображение"]));
+    app.appendChild(el("p", {class: "note"}, ["ρ(J) — спектральный радиус якобиана шага, "
+      + "степенной метод. Ниже 1 — сжатие, теорема Банаха гарантирует единственную "
+      + "неподвижную точку и геометрическую сходимость, и тогда лишние лупы ничего "
+      + "нового дать не могут. Выше 1 — состояние продолжает двигаться."]));
+    const sel = el("select", {}, withFinal.map(r => el("option", {}, [r])));
+    app.appendChild(el("div", {class: "ctl"}, [sel]));
+    const box = el("div", {class: "grid"});
+    app.appendChild(box);
+
+    function draw() {
+      const f = DATA.runs[sel.value].final;
+      box.textContent = "";
+      box.appendChild(card("ρ(J)", "спектральный радиус шага, лог",
+        chart([{pts: f.rows.map(r => [r.step, r.spectral_radius])}], {log: true})));
+      const ovt = f.one_vs_two || [];
+      if (ovt.length) {
+        box.appendChild(card("cos(Δ₁, Δ₂)", "один шаг против двух из того же состояния",
+          chart([{pts: ovt.map(r => [r.step, r.cos_one_two])}], {})));
+        box.appendChild(card("KL(p₂ ‖ p₁)", "насколько второй шаг меняет предсказание",
+          chart([{pts: ovt.map(r => [r.step, r.kl_one_two])}], {log: true})));
+        box.appendChild(card("лосс: 1 шаг и 2 шага", "ниже — лучше",
+          chart([{pts: ovt.map(r => [r.step, r.loss_one])},
+                 {pts: ovt.map(r => [r.step, r.loss_two])}], {})));
+      }
+      for (const [key, title, sub] of [["traj_drift", "траектория вдоль ухода",
+          "ось 1 — суммарное смещение, ось 2 — остаток последнего шага"],
+          ["traj_pca", "траектория в PCA", "главные компоненты по токенам"]]) {
+        const tr = f[key];
+        if (!tr) continue;
+        const nTok = tr[0].length;
+        const series = [];
+        for (let t = 0; t < nTok; t++) series.push({pts: tr.map(st => st[t]), w: 1.2});
+        box.appendChild(card(title, sub, chart(series, {})));
+      }
+    }
+    sel.onchange = draw;
+    draw();
+  }
+}
+
 // --- 4. градиент по блокам во время обучения
 {
   app.appendChild(el("h2", {}, ["Градиент по блокам за время обучения"]));
@@ -264,6 +309,8 @@ def collect(root):
             diag = [json.loads(line) for line in jsonl.read_text().splitlines() if line.strip()]
         plan = loop_plan(cfg["n_layers"], cfg["n_loops"],
                          cfg.get("loop_scheme", "stack"), cfg.get("group_size", 2))
+        final = path.parent / "diag.json"
+        blob["final"] = json.loads(final.read_text()) if final.exists() else None
         vocab = round(blob["params"]["total"] - blob["params"]["non_embedding"]) // cfg["d_model"]
         runs[path.parent.name] = {**blob, "diag": diag, "plan": plan, "vocab_size": vocab}
     return {"runs": runs}
