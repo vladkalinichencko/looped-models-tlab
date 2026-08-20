@@ -16,6 +16,7 @@ import time
 
 import mlflow
 import torch
+import torch.nn.functional as F
 
 import data
 import diag
@@ -45,6 +46,33 @@ def evaluate(model, val, n_loops=None):
     return loss
 
 
+def objective(model, x, y, args, generator):
+    """Целевая функция прогона. Обычный лосс — частный случай, когда всё выключено."""
+    n_loops = None
+    if args.loop_sampling == "uniform":
+        n_loops = int(torch.randint(1, args.n_loops + 1, (1,), generator=generator).item())
+    if not (args.deep_supervision or args.early_exit or args.progress_head):
+        return model(x, y, n_loops=n_loops)[1]
+
+    states, losses = model.walk(x, y, n_loops)
+    loss = losses[-1].mean()
+    if args.deep_supervision and len(losses) > 1:
+        loss = loss + args.deep_supervision * torch.stack(losses[:-1]).mean()
+    if model.exit_head is not None:
+        p = model.halting(states)
+        loss = loss + (p * torch.stack(losses, dim=-1)).sum(-1).mean()
+        steps = torch.arange(p.shape[-1], device=p.device)
+        prior = args.ponder_prior * (1 - args.ponder_prior) ** steps
+        prior = prior / prior.sum()
+        loss = loss + args.ponder_beta * F.kl_div(prior.log().expand_as(p), p,
+                                                  reduction="batchmean")
+    if model.progress is not None:
+        gain = torch.stack([losses[t] - losses[t + 1] for t in range(len(losses) - 1)], dim=-1)
+        pred = model.predicted_gain(states)[..., :gain.shape[-1]]
+        loss = loss + args.progress_beta * F.mse_loss(pred, gain.detach())
+    return loss
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--tag", required=True)
@@ -65,6 +93,21 @@ def main():
                    help="нормализовать h после каждого лупа")
     p.add_argument("--step-cond", action="store_true",
                    help="прибавлять эмбеддинг номера шага")
+    p.add_argument("--deep-supervision", type=float, default=0.0,
+                   help="вес лосса на промежуточных шагах: L_T + b * среднее(L_t). "
+                        "Требует, чтобы луп улучшал предсказание, а не только доводил "
+                        "до конца — анти-DEQ по смыслу")
+    p.add_argument("--early-exit", action="store_true",
+                   help="голова остановки, лосс PonderNet: sum p_t L_t + b KL(p||Geom)")
+    p.add_argument("--ponder-beta", type=float, default=0.01)
+    p.add_argument("--ponder-prior", type=float, default=0.3,
+                   help="lambda геометрического приора: чем больше, тем раньше остановка")
+    p.add_argument("--progress-head", action="store_true",
+                   help="голова PALBERT: предсказывает, сколько лосса снимет следующий шаг")
+    p.add_argument("--progress-beta", type=float, default=0.1)
+    p.add_argument("--loop-sampling", choices=["fixed", "uniform"], default="fixed",
+                   help="uniform — случайное число лупов на каждом батче, как в Huginn: "
+                        "модель должна работать на любой глубине, а не только на своей")
     p.add_argument("--grad-checkpoint", action="store_true",
                    help="пересчитывать активации шага при бэкпропе; нужно при многих лупах")
     p.add_argument("--seq-len", type=int, default=512)
@@ -111,6 +154,8 @@ def main():
         loop_norm=args.loop_norm,
         input_injection=args.input_injection,
         step_cond=args.step_cond,
+        early_exit=args.early_exit,
+        progress_head=args.progress_head,
         grad_checkpoint=args.grad_checkpoint,
     )
     model = LoopedLM(cfg).to(device)
@@ -152,6 +197,7 @@ def main():
     sx = dx[:, :128]  # для спектрального радиуса хватает короткой последовательности
     diag_log = (out / "diag.jsonl").open("w")
 
+    generator = torch.Generator().manual_seed(args.seed)
     best, history, t0 = float("inf"), [], time.time()
     for step, (x, y) in enumerate(train):
         if step >= total_steps:
@@ -159,11 +205,7 @@ def main():
         for g in opt.param_groups:
             g["lr"] = lr_at(step, total_steps, args.warmup, args.lr, args.min_lr)
 
-        if amp is not None:
-            with amp:
-                _, loss = model(x, y)
-        else:
-            _, loss = model(x, y)
+        loss = objective(model, x, y, args, generator)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
         by_block = diag.layer_grad_norms(model) if args.diag_every else {}

@@ -37,6 +37,8 @@ class Config:
     loop_norm: bool = False  # нормализовать h после каждого лупа (см. NOTES: рост нормы)
     input_injection: bool = False  # подмешивать эмбеддинги на каждом лупе (Huginn)
     step_cond: bool = False  # прибавлять эмбеддинг номера шага (Universal Transformers)
+    early_exit: bool = False  # голова остановки, PonderNet / Q-exit
+    progress_head: bool = False  # голова, предсказывающая пользу следующего лупа (PALBERT)
     grad_checkpoint: bool = False  # хранить только состояния на границах шагов
 
 
@@ -140,6 +142,12 @@ class LoopedLM(nn.Module):
         self.norm = RMSNorm(cfg.d_model, cfg.rms_norm_eps)
         self.loop_norm = RMSNorm(cfg.d_model, cfg.rms_norm_eps) if cfg.loop_norm else None
         self.step_emb = nn.Embedding(len(self.plan(cfg.n_loops)), cfg.d_model) if cfg.step_cond else None
+        # голова остановки смотрит на состояние, голова прогресса — на состояние и на
+        # то, куда его только что сдвинули: PALBERT показывает, что динамика говорит
+        # о пользе следующего шага больше, чем само состояние
+        self.exit_head = nn.Linear(cfg.d_model, 1) if cfg.early_exit else None
+        self.progress = nn.Sequential(nn.Linear(2 * cfg.d_model, cfg.d_model), nn.SiLU(),
+                                      nn.Linear(cfg.d_model, 1)) if cfg.progress_head else None
         self.lm_head = nn.Linear(cfg.d_model, cfg.vocab_size, bias=False)
         if cfg.tie_embeddings:
             self.lm_head.weight = self.embed.weight
@@ -195,9 +203,40 @@ class LoopedLM(nn.Module):
     def head(self, h):
         return self.lm_head(self.norm(h))
 
-    def forward(self, idx, targets=None, n_loops=None):
-        for h in self.trace(idx, n_loops):
-            pass
+    def token_loss(self, h, targets):
+        """Лосс по каждой позиции отдельно — нужен головам, которые решают по позициям."""
+        logits = self.head(h)
+        return F.cross_entropy(logits.reshape(-1, logits.size(-1)), targets.reshape(-1),
+                               reduction="none").view(targets.shape)
+
+    def walk(self, idx, targets, n_loops=None):
+        """Состояния и потокенный лосс на каждом шаге плана.
+
+        Всё, чему нужен весь путь, а не только его конец — глубокий надзор, остановка,
+        голова прогресса — считается отсюда, чтобы не расходиться с forward.
+        """
+        states = list(self.trace(idx, n_loops))
+        return states, [self.token_loss(h, targets) for h in states[1:]]
+
+    def halting(self, states):
+        """PonderNet: lambda_t на каждом шаге -> вероятность остановиться именно на нём."""
+        lam = torch.sigmoid(torch.cat([self.exit_head(h) for h in states[1:]], dim=-1))
+        keep = torch.cumprod(1 - lam, dim=-1)
+        p = torch.cat([lam[..., :1], lam[..., 1:] * keep[..., :-1]], dim=-1)
+        return p / p.sum(-1, keepdim=True).clamp_min(1e-9)
+
+    def predicted_gain(self, states):
+        """Насколько, по мнению головы, следующий шаг уменьшит лосс."""
+        return torch.cat([self.progress(torch.cat([states[t], states[t + 1] - states[t]], -1))
+                          for t in range(len(states) - 1)], dim=-1)
+
+    def forward(self, idx, targets=None, n_loops=None, exit_threshold=None):
+        h = None
+        for t, h in enumerate(self.trace(idx, n_loops)):
+            # ранний выход на инференсе: дальше не идём, если голова уверена, что пора
+            if exit_threshold is not None and t and self.exit_head is not None:
+                if float(torch.sigmoid(self.exit_head(h)).mean()) > exit_threshold:
+                    break
         logits = self.head(h)
         if targets is None:
             return logits, None
