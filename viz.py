@@ -337,16 +337,43 @@ def collect(root):
     return {"runs": runs}
 
 
+SHAPE = ("tokenizer", "d_model", "n_heads", "n_kv_heads", "head_dim", "n_layers", "d_ff")
+
+
+def same_shape(runs):
+    """Keep only the runs whose architecture matches the newest one.
+
+    Perplexities from different shapes or different tokenizers sit on the same axis
+    and look comparable. They are not, and a plot that mixes them is worse than no
+    plot — so the mixing is refused rather than annotated.
+    """
+    def shape(run):
+        return tuple(run["config"].get(k) for k in SHAPE)
+
+    if not runs:
+        return runs
+    newest = max(runs, key=lambda tag: runs[tag]["history"][-1]["step"] if runs[tag]["history"] else 0)
+    keep = {tag: run for tag, run in runs.items() if shape(run) == shape(runs[newest])}
+    dropped = sorted(set(runs) - set(keep))
+    if dropped:
+        print(f"отброшены прогоны другой архитектуры: {', '.join(dropped)}")
+    return keep
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--runs", default="runs")
     p.add_argument("--out", default="runs/report.html")
     p.add_argument("--only", nargs="+", default=None, help="какие прогоны показывать")
+    p.add_argument("--all-shapes", action="store_true",
+                   help="не отбрасывать прогоны другой архитектуры")
     args = p.parse_args()
 
     data = collect(args.runs)
     if args.only:
         data["runs"] = {k: v for k, v in data["runs"].items() if k in args.only}
+    if not args.all_shapes:
+        data["runs"] = same_shape(data["runs"])
     out = pathlib.Path(args.out)
     out.write_text(TEMPLATE.replace("__DATA__", json.dumps(data)))
     print(f"{len(data['runs'])} прогонов -> {out}")
