@@ -1,0 +1,8 @@
+loops=  1  val loss 8.1542  ppl 3477.91
+loops=  2  val loss 8.1612  ppl 3502.55
+loops=  4  val loss 8.1950  ppl 3622.71
+loops=  8  val loss 8.2199  ppl 3714.10
+loops= 16  val loss 8.2332  ppl 3764.01
+-> runs/smoke/eval.json
+'[Errno 9] Bad file descriptor' thrown while requesting GET https://huggingface.co/datasets/HuggingFaceFW/fineweb/resolve/9bb295ddab0e05d785b879661af7260fed5140fc/sample/10BT/000_00000.parquet
+Retrying in 1s [Retry 1/5].

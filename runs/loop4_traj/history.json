@@ -1,0 +1,94 @@
+{
+  "config": {
+    "tag": "loop4_traj",
+    "tokenizer": "Qwen/Qwen3-0.6B",
+    "tokens": 2000000,
+    "n_loops": 4,
+    "n_layers": 2,
+    "d_model": 256,
+    "n_heads": 8,
+    "d_ff": 704,
+    "loop_norm": false,
+    "seq_len": 256,
+    "batch_size": 4,
+    "lr": 0.003,
+    "min_lr": 0.0003,
+    "warmup": 200,
+    "weight_decay": 0.1,
+    "grad_clip": 1.0,
+    "val_batches": 10,
+    "eval_every": 200,
+    "save_every": 200,
+    "log_every": 400,
+    "seed": 0,
+    "device": "mps"
+  },
+  "params": {
+    "total": 40434304,
+    "non_embedding": 1607040
+  },
+  "best_val_loss": 7.0881712436676025,
+  "best_val_ppl": 1197.7154668552942,
+  "history": [
+    {
+      "step": 200,
+      "tokens": 204800,
+      "val_loss": 8.734938812255859,
+      "val_ppl": 6216.353826085093
+    },
+    {
+      "step": 400,
+      "tokens": 409600,
+      "val_loss": 7.872733926773071,
+      "val_ppl": 2624.731612058118
+    },
+    {
+      "step": 600,
+      "tokens": 614400,
+      "val_loss": 7.642420244216919,
+      "val_ppl": 2084.78340056813
+    },
+    {
+      "step": 800,
+      "tokens": 819200,
+      "val_loss": 7.4929296493530275,
+      "val_ppl": 1795.3040061737713
+    },
+    {
+      "step": 1000,
+      "tokens": 1024000,
+      "val_loss": 7.378788566589355,
+      "val_ppl": 1601.648301826624
+    },
+    {
+      "step": 1200,
+      "tokens": 1228800,
+      "val_loss": 7.322506952285766,
+      "val_ppl": 1513.9947286977722
+    },
+    {
+      "step": 1400,
+      "tokens": 1433600,
+      "val_loss": 7.231812429428101,
+      "val_ppl": 1382.726328287718
+    },
+    {
+      "step": 1600,
+      "tokens": 1638400,
+      "val_loss": 7.157021331787109,
+      "val_ppl": 1283.0833555886586
+    },
+    {
+      "step": 1800,
+      "tokens": 1843200,
+      "val_loss": 7.128097438812256,
+      "val_ppl": 1246.503160939342
+    },
+    {
+      "step": 1952,
+      "tokens": 1998848,
+      "val_loss": 7.0881712436676025,
+      "val_ppl": 1197.7154668552942
+    }
+  ]
+}

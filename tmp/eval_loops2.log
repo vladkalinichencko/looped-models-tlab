@@ -1,0 +1,6 @@
+loops=  1  val loss 5.3676  ppl 214.35
+loops=  2  val loss 4.9847  ppl 146.16
+loops=  4  val loss 5.2574  ppl 191.98
+loops=  8  val loss 6.0783  ppl 436.29
+loops= 16  val loss 7.0408  ppl 1142.29
+-> runs/loops2/eval.json

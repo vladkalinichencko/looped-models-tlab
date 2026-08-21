@@ -1,0 +1,115 @@
+{
+  "config": {
+    "tag": "idea_huginn",
+    "tokenizer": "tokenizers/fineweb16k",
+    "tokens": 8000000,
+    "n_loops": 4,
+    "n_layers": 2,
+    "d_model": 384,
+    "n_heads": 6,
+    "n_kv_heads": 3,
+    "head_dim": 128,
+    "d_ff": 1152,
+    "loop_scheme": "stack",
+    "group_size": 2,
+    "input_injection": "concat",
+    "loop_norm": false,
+    "step_cond": false,
+    "deep_supervision": 0.0,
+    "early_exit": "none",
+    "ponder_beta": 0.5,
+    "ponder_prior": 0.3,
+    "progress_head": false,
+    "progress_beta": 0.1,
+    "loop_sampling": "lognormal",
+    "loop_mean": 4.0,
+    "loop_sigma": 0.5,
+    "backprop_last": 4,
+    "n_prelude": 1,
+    "n_coda": 1,
+    "grad_checkpoint": true,
+    "seq_len": 512,
+    "batch_size": 16,
+    "lr": 0.003,
+    "min_lr": 0.0003,
+    "warmup": 200,
+    "weight_decay": 0.1,
+    "grad_clip": 1.0,
+    "val_batches": 20,
+    "eval_every": 100,
+    "save_every": 0,
+    "log_every": 50,
+    "diag_every": 100,
+    "spectral_every": 4,
+    "seed": 0,
+    "device": "auto"
+  },
+  "params": {
+    "total": 15438208,
+    "non_embedding": 9146752
+  },
+  "best_val_loss": 5.776115870475769,
+  "best_val_ppl": 322.5041068185297,
+  "history": [
+    {
+      "step": 100,
+      "tokens": 819200,
+      "val_loss": 7.148992228507995,
+      "val_ppl": 1272.8225942899082
+    },
+    {
+      "step": 200,
+      "tokens": 1638400,
+      "val_loss": 6.732712888717652,
+      "val_ppl": 839.4214367182868
+    },
+    {
+      "step": 300,
+      "tokens": 2457600,
+      "val_loss": 6.551959776878357,
+      "val_ppl": 700.6158800601175
+    },
+    {
+      "step": 400,
+      "tokens": 3276800,
+      "val_loss": 6.318881893157959,
+      "val_ppl": 554.9521496362692
+    },
+    {
+      "step": 500,
+      "tokens": 4096000,
+      "val_loss": 6.1731071949005125,
+      "val_ppl": 479.67423427447073
+    },
+    {
+      "step": 600,
+      "tokens": 4915200,
+      "val_loss": 6.068603944778443,
+      "val_ppl": 432.0770568944276
+    },
+    {
+      "step": 700,
+      "tokens": 5734400,
+      "val_loss": 6.015500688552857,
+      "val_ppl": 409.7309351566622
+    },
+    {
+      "step": 800,
+      "tokens": 6553600,
+      "val_loss": 5.859290671348572,
+      "val_ppl": 350.47545354787843
+    },
+    {
+      "step": 900,
+      "tokens": 7372800,
+      "val_loss": 5.789159512519836,
+      "val_ppl": 326.73828949491957
+    },
+    {
+      "step": 975,
+      "tokens": 7987200,
+      "val_loss": 5.776115870475769,
+      "val_ppl": 322.5041068185297
+    }
+  ]
+}

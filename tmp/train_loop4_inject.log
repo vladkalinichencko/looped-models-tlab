@@ -1,0 +1,13 @@
+device=mps  params: 40.43M total / 1.61M non-embedding
+!! over the 10M budget on the total-parameter reading — see NOTES
+step      0/1953  tok    0.0M  loss 11.9734  3s
+step    400/1953  tok    0.4M  loss 7.3803  127s
+  val loss 7.9023  ppl 2703.52
+step    800/1953  tok    0.8M  loss 7.1385  263s
+  val loss 7.4473  ppl 1715.19
+step   1200/1953  tok    1.2M  loss 7.0957  375s
+  val loss 7.2848  ppl 1457.98
+step   1600/1953  tok    1.6M  loss 7.0629  485s
+  val loss 7.1637  ppl 1291.66
+  val loss 7.0880  ppl 1197.46
+best val ppl 1197.4586067673781 -> runs/loop4_inject

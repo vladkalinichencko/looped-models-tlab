@@ -1,0 +1,18 @@
+device=mps  params: 40.43M total / 1.61M non-embedding
+!! over the 10M budget on the total-parameter reading — see NOTES
+step      0/97  tok    0.0M  loss 11.9800  3s
+step     10/97  tok    0.0M  loss 11.7885  13s
+step     20/97  tok    0.0M  loss 11.2803  18s
+  val loss 11.4611  ppl 94953.22
+step     30/97  tok    0.0M  loss 10.8872  31s
+step     40/97  tok    0.0M  loss 9.4756  41s
+  val loss 9.3218  ppl 11178.98
+step     50/97  tok    0.1M  loss 8.0954  50s
+step     60/97  tok    0.1M  loss 7.8993  60s
+  val loss 8.2761  ppl 3928.85
+step     70/97  tok    0.1M  loss 7.8857  70s
+step     80/97  tok    0.1M  loss 7.8008  80s
+  val loss 8.2805  ppl 3946.20
+step     90/97  tok    0.1M  loss 8.2975  92s
+  val loss 8.1950  ppl 3622.71
+best val ppl 3622.711805035967 -> runs/smoke

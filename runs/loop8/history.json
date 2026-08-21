@@ -1,0 +1,93 @@
+{
+  "config": {
+    "tag": "loop8",
+    "tokenizer": "Qwen/Qwen3-0.6B",
+    "tokens": 2000000,
+    "n_loops": 8,
+    "n_layers": 2,
+    "d_model": 256,
+    "n_heads": 8,
+    "d_ff": 704,
+    "loop_norm": false,
+    "seq_len": 256,
+    "batch_size": 4,
+    "lr": 0.003,
+    "min_lr": 0.0003,
+    "warmup": 200,
+    "weight_decay": 0.1,
+    "grad_clip": 1.0,
+    "val_batches": 10,
+    "eval_every": 200,
+    "log_every": 200,
+    "seed": 0,
+    "device": "auto"
+  },
+  "params": {
+    "total": 40434304,
+    "non_embedding": 1607040
+  },
+  "best_val_loss": 7.0911448955535885,
+  "best_val_ppl": 1201.2823564277526,
+  "history": [
+    {
+      "step": 200,
+      "tokens": 204800,
+      "val_loss": 8.785637283325196,
+      "val_ppl": 6539.639256185251
+    },
+    {
+      "step": 400,
+      "tokens": 409600,
+      "val_loss": 7.836776685714722,
+      "val_ppl": 2532.0301371844116
+    },
+    {
+      "step": 600,
+      "tokens": 614400,
+      "val_loss": 7.659648752212524,
+      "val_ppl": 2121.0122968467185
+    },
+    {
+      "step": 800,
+      "tokens": 819200,
+      "val_loss": 7.511302947998047,
+      "val_ppl": 1828.594554926861
+    },
+    {
+      "step": 1000,
+      "tokens": 1024000,
+      "val_loss": 7.3924860000610355,
+      "val_ppl": 1623.7377116302712
+    },
+    {
+      "step": 1200,
+      "tokens": 1228800,
+      "val_loss": 7.2920654773712155,
+      "val_ppl": 1468.6009286749454
+    },
+    {
+      "step": 1400,
+      "tokens": 1433600,
+      "val_loss": 7.220066404342651,
+      "val_ppl": 1366.5798045289216
+    },
+    {
+      "step": 1600,
+      "tokens": 1638400,
+      "val_loss": 7.146262311935425,
+      "val_ppl": 1269.3526333027908
+    },
+    {
+      "step": 1800,
+      "tokens": 1843200,
+      "val_loss": 7.126124858856201,
+      "val_ppl": 1244.0467573116973
+    },
+    {
+      "step": 1952,
+      "tokens": 1998848,
+      "val_loss": 7.0911448955535885,
+      "val_ppl": 1201.2823564277526
+    }
+  ]
+}

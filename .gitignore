@@ -11,15 +11,19 @@ wandb/
 .hydra/
 outputs/
 
-# данные и артефакты: наружу не уезжают
+# скачанные данные и внешний код
 datasets/*
-runs/*
-tmp/*
 ext/*
 !datasets/.gitkeep
-!runs/.gitkeep
-!tmp/.gitkeep
+!datasets/*.json
 !ext/.gitkeep
+
+# тяжёлые веса; код, логи, tmp, HTML и рисунки остаются в git
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.bin
 
 # секреты
 .env
@@ -30,5 +34,4 @@ mlflow.db
 mlruns/
 mlartifacts/
 
-# логи прогонов, на которые ссылаются заметки — в git
-!logs/
+# logs/, runs/ и tmp/ содержат доказательства и отслеживаются

@@ -1,0 +1,23 @@
+device=mps  params: 40.43M total / 1.61M non-embedding
+!! over the 10M budget on the total-parameter reading — see NOTES
+step      0/1953  tok    0.0M  loss 11.9797  2s
+step    200/1953  tok    0.2M  loss 6.6712  102s
+  val loss 8.7856  ppl 6539.64
+step    400/1953  tok    0.4M  loss 7.3257  179s
+  val loss 7.8368  ppl 2532.03
+step    600/1953  tok    0.6M  loss 7.4520  240s
+  val loss 7.6596  ppl 2121.01
+step    800/1953  tok    0.8M  loss 7.2037  329s
+  val loss 7.5113  ppl 1828.59
+step   1000/1953  tok    1.0M  loss 6.8209  417s
+  val loss 7.3925  ppl 1623.74
+step   1200/1953  tok    1.2M  loss 7.1289  505s
+  val loss 7.2921  ppl 1468.60
+step   1400/1953  tok    1.4M  loss 6.9541  595s
+  val loss 7.2201  ppl 1366.58
+step   1600/1953  tok    1.6M  loss 6.9255  685s
+  val loss 7.1463  ppl 1269.35
+step   1800/1953  tok    1.8M  loss 7.9117  775s
+  val loss 7.1261  ppl 1244.05
+  val loss 7.0911  ppl 1201.28
+best val ppl 1201.2823564277526 -> runs/loop8

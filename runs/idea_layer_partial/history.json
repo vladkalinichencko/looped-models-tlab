@@ -1,0 +1,80 @@
+{
+  "config": {
+    "tag": "idea_layer",
+    "tokenizer": "tokenizers/fineweb16k",
+    "tokens": 8000000,
+    "n_loops": 4,
+    "n_layers": 4,
+    "d_model": 384,
+    "n_heads": 6,
+    "n_kv_heads": 3,
+    "head_dim": 128,
+    "d_ff": 1152,
+    "loop_scheme": "layer",
+    "group_size": 2,
+    "input_injection": false,
+    "loop_norm": false,
+    "step_cond": false,
+    "deep_supervision": 0.0,
+    "early_exit": false,
+    "ponder_beta": 0.01,
+    "ponder_prior": 0.3,
+    "progress_head": false,
+    "progress_beta": 0.1,
+    "loop_sampling": "fixed",
+    "grad_checkpoint": true,
+    "seq_len": 512,
+    "batch_size": 16,
+    "lr": 0.003,
+    "min_lr": 0.0003,
+    "warmup": 200,
+    "weight_decay": 0.1,
+    "grad_clip": 1.0,
+    "val_batches": 20,
+    "eval_every": 100,
+    "save_every": 0,
+    "log_every": 50,
+    "diag_every": 100,
+    "spectral_every": 4,
+    "seed": 0,
+    "device": "auto"
+  },
+  "params": {
+    "total": 15143296,
+    "non_embedding": 8851840
+  },
+  "best_val_loss": 6.226440501213074,
+  "best_val_ppl": 505.95134129410235,
+  "history": [
+    {
+      "step": 100,
+      "tokens": 819200,
+      "val_loss": 7.328875970840454,
+      "val_ppl": 1523.6681616538142
+    },
+    {
+      "step": 200,
+      "tokens": 1638400,
+      "val_loss": 6.879676246643067,
+      "val_ppl": 972.3115197108765
+    },
+    {
+      "step": 300,
+      "tokens": 2457600,
+      "val_loss": 6.646834349632263,
+      "val_ppl": 770.3418286361988
+    },
+    {
+      "step": 400,
+      "tokens": 3276800,
+      "val_loss": 6.391215443611145,
+      "val_ppl": 596.5812500697368
+    },
+    {
+      "step": 500,
+      "tokens": 4096000,
+      "val_loss": 6.226440501213074,
+      "val_ppl": 505.95134129410235
+    }
+  ]
+}
