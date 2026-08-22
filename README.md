@@ -10,23 +10,19 @@
 source .venv/bin/activate
 ```
 
-## Train
+## Clean Mac preliminary runs
 
 ```bash
-python train.py --tag smoke --tokens 200000 --eval-every 50    # smoke-тест
-python train.py --tag loop4 --n-loops 4 --tokens 100000000
+python -m tmp.test_clean_path
+python run_preliminary.py
 ```
 
-Артефакты — `runs/<tag>/ckpt.pt` и `runs/<tag>/history.json`.
+Фиксированные Python-конфигурации находятся в `run_preliminary.py`. Каждый прогон
+пишет `config.json`, `metrics.jsonl`, `history.json`, `best.pt`, `last.pt`, snapshots
+реальных held-out тензоров и самодостаточный `report.html`.
 
 ## Eval
 
 ```bash
-python eval.py runs/loop4/ckpt.pt --loops 1 2 4 8 16 32
-```
-
-Метрики — в локальный MLflow (`sqlite:///mlflow.db`):
-
-```bash
-mlflow ui --backend-store-uri sqlite:///mlflow.db
+python eval.py runs/huginn-clean-mac/best.pt
 ```

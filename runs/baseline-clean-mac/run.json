@@ -1,0 +1,13 @@
+{
+  "status": "completed",
+  "steps": 976,
+  "tokens": 7995392,
+  "best_selection_loss": 5.621429836048799,
+  "best_selection_ppl": 276.2841419732951,
+  "device": "mps",
+  "dtype": "float32",
+  "torch": "2.13.0",
+  "params_total": 15143296,
+  "params_non_embedding": 8851840,
+  "data_manifest": "datasets/fineweb_06c0e26f662f_512_8000000.json"
+}

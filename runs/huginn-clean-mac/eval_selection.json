@@ -1,0 +1,31 @@
+{
+  "checkpoint": "runs/huginn-clean-mac/best.pt",
+  "split": "selection",
+  "rows": [
+    {
+      "recurrence": 1,
+      "loss": 5.465570842518526,
+      "ppl": 236.41076991694874
+    },
+    {
+      "recurrence": 2,
+      "loss": 5.464373953202191,
+      "ppl": 236.1279816590499
+    },
+    {
+      "recurrence": 4,
+      "loss": 5.464306214276482,
+      "ppl": 236.1119871449743
+    },
+    {
+      "recurrence": 8,
+      "loss": 5.464305989882526,
+      "ppl": 236.11193416287722
+    },
+    {
+      "recurrence": 16,
+      "loss": 5.464305877685547,
+      "ppl": 236.11190767183302
+    }
+  ]
+}

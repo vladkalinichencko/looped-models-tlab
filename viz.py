@@ -1,383 +1,80 @@
-"""runs/*/{history.json,diag.jsonl} -> one self-contained interactive page.
+"""Build self-contained HTML from run JSON and saved held-out tensors."""
 
-Static pictures answer one question each and then go stale. The diagnostics here are
-a cube — metric x loop index x training step x run — so the page keeps the cube and
-lets you slice it: pick a run, drag the training step, watch the per-loop curves move.
-
-    python viz.py                      # -> runs/report.html
-    python viz.py --out /tmp/x.html
-"""
-
-import argparse
 import json
-import pathlib
+import os
+from pathlib import Path
 
-TEMPLATE = """<title>Looped models — диагностика</title>
-<style>
-:root { --bg:#fff; --fg:#111; --mut:#666; --line:#ddd; --acc:#2b6cb0; }
-:root:not([data-theme=light]) { }
-@media (prefers-color-scheme: dark) { :root:not([data-theme=light]) {
-  --bg:#14161a; --fg:#e8e8e8; --mut:#9aa0a6; --line:#2c3038; --acc:#7aa7dd; } }
-:root[data-theme=dark] { --bg:#14161a; --fg:#e8e8e8; --mut:#9aa0a6; --line:#2c3038; --acc:#7aa7dd; }
-body { background:var(--bg); color:var(--fg); font:14px/1.5 -apple-system,system-ui,sans-serif;
-       margin:0 auto; max-width:1180px; padding:24px; }
-h1 { font-size:20px; margin:0 0 4px; } h2 { font-size:15px; margin:28px 0 8px; font-weight:600; }
-p.note { color:var(--mut); margin:2px 0 14px; }
-table { border-collapse:collapse; font-size:13px; } td,th { padding:3px 10px 3px 0; text-align:right; }
-th:first-child,td:first-child { text-align:left; }
-th { border-bottom:1px solid var(--line); font-weight:600; }
-.grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(270px,1fr)); gap:14px; }
-.card { border:1px solid var(--line); border-radius:6px; padding:8px 10px; overflow-x:auto; }
-.card b { font-size:12px; font-weight:600; } .card span { color:var(--mut); font-size:11px; }
-.ctl { display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin:8px 0 4px; }
-select,input[type=range] { accent-color:var(--acc); }
-.legend { display:flex; gap:12px; flex-wrap:wrap; font-size:12px; color:var(--mut); margin:4px 0; }
-.legend i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:4px; }
-svg { display:block; } .ax { stroke:var(--line); } .tick { fill:var(--mut); font-size:10px; }
-</style>
-<h1>Looped models — что происходит с состоянием между лупами</h1>
-<p class="note">Данные — runs/*/history.json и runs/*/diag.jsonl. Ничего не досчитывается на странице.</p>
-<div id="app"></div>
-<script>
-const DATA = __DATA__;
-const PAL = ["#2b6cb0","#c05621","#2f855a","#805ad5","#b83280","#4a5568","#b7791f","#2c7a7b"];
+import torch
 
-const SVG = new Set(["svg", "g", "path", "line", "text", "rect", "circle"]);
-function el(tag, attrs, kids) {
-  const n = document.createElementNS(SVG.has(tag)
-      ? "http://www.w3.org/2000/svg" : "http://www.w3.org/1999/xhtml", tag);
-  for (const k in (attrs || {})) n.setAttribute(k, attrs[k]);
-  for (const c of (kids || [])) n.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
-  return n;
-}
-const fmt = v => Math.abs(v) >= 1000 || (Math.abs(v) < 0.01 && v !== 0)
-  ? v.toExponential(1) : (+v.toFixed(3)).toString();
 
-function chart(series, o) {
-  o = Object.assign({w: 260, h: 150, log: false, xlab: "", pad: 34}, o);
-  const pts = series.flatMap(s => s.pts).filter(p => isFinite(p[1]));
-  if (!pts.length) return el("svg", {width: o.w, height: o.h});
-  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
-  const tr = v => o.log ? Math.log10(Math.max(v, 1e-12)) : v;
-  let [x0, x1] = [Math.min(...xs), Math.max(...xs)];
-  let [y0, y1] = [Math.min(...ys.map(tr)), Math.max(...ys.map(tr))];
-  if (x1 === x0) x1 = x0 + 1;
-  if (y1 === y0) { y0 -= .5; y1 += .5; }
-  const m = (y1 - y0) * 0.08; y0 -= m; y1 += m;
-  const X = v => o.pad + (v - x0) / (x1 - x0) * (o.w - o.pad - 8);
-  const Y = v => o.h - 20 - (tr(v) - y0) / (y1 - y0) * (o.h - 30);
-  const g = el("svg", {width: o.w, height: o.h});
-  g.appendChild(el("line", {x1: o.pad, y1: o.h - 20, x2: o.w - 8, y2: o.h - 20, class: "ax"}));
-  g.appendChild(el("line", {x1: o.pad, y1: 10, x2: o.pad, y2: o.h - 20, class: "ax"}));
-  for (const [v, y] of [[y1 - m, 14], [y0 + m, o.h - 22]])
-    g.appendChild(el("text", {x: 2, y: y, class: "tick"}, [fmt(o.log ? Math.pow(10, v) : v)]));
-  for (const [v, a] of [[x0, "start"], [x1, "end"]])
-    g.appendChild(el("text", {x: X(v), y: o.h - 6, class: "tick", "text-anchor": a}, [fmt(v)]));
-  series.forEach((s, i) => {
-    const d = s.pts.filter(p => isFinite(p[1])).map((p, j) => (j ? "L" : "M") + X(p[0]) + " " + Y(p[1])).join(" ");
-    g.appendChild(el("path", {d: d, fill: "none", "stroke-width": s.w || 1.6,
-      stroke: s.color || PAL[i % PAL.length], opacity: s.o == null ? 1 : s.o}));
-  });
-  return g;
-}
-
-function card(title, sub, svg) {
-  return el("div", {class: "card"}, [el("b", {}, [title]), sub ? el("span", {}, [" — " + sub]) : "", svg]);
-}
-function legend(names, colors) {
-  return el("div", {class: "legend"}, names.map((n, i) =>
-    el("span", {}, [el("i", {style: "background:" + (colors ? colors[i] : PAL[i % PAL.length])}), n])));
-}
-
-const app = document.getElementById("app");
-const runs = Object.keys(DATA.runs);
-
-// --- 1. параметры прогонов
-{
-  const rows = runs.map(r => DATA.runs[r].config);
-  const cols = ["tag", "n_loops", "loop_scheme", "input_injection", "step_cond", "tokens"];
-  const t = el("table", {}, [el("tr", {}, cols.concat(["non-emb", "val ppl"]).map(c => el("th", {}, [c])))]);
-  runs.forEach(r => {
-    const c = DATA.runs[r], p = c.best_val_ppl;
-    t.appendChild(el("tr", {}, cols.map(k => el("td", {}, [String(c.config[k])]))
-      .concat([el("td", {}, [fmt(c.params.non_embedding / 1e6) + "M"]),
-               el("td", {}, [p == null ? "—" : fmt(p)])])));
-  });
-  app.appendChild(el("h2", {}, ["Прогоны"]));
-  app.appendChild(t);
-}
-
-// --- 1b. архитектура прогона, из конфига
-{
-  app.appendChild(el("h2", {}, ["Архитектура"]));
-  app.appendChild(el("p", {class: "note"}, ["Рисуется из конфига прогона, а не из "
-    + "отдельной картинки, поэтому не может разойтись с кодом. Числа в скобках — "
-    + "параметры блока."]));
-  const sel = el("select", {}, runs.map(r => el("option", {}, [r])));
-  app.appendChild(el("div", {class: "ctl"}, [sel]));
-  const box = el("div", {});
-  app.appendChild(box);
-
-  function arch() {
-    const c = DATA.runs[sel.value].config;
-    const d = c.d_model, ff = c.d_ff, V = DATA.runs[sel.value].vocab_size || 16384;
-    const hd = d / c.n_heads;
-    const plan = DATA.runs[sel.value].plan;
-    const W = 900, rowH = 26;
-    const rows = [];
-    const push = (t, sub, note, ind) => rows.push([t, sub, note, ind || 0]);
-    push("idx", "(B, S) int64", "токены", 0);
-    push("Embedding", V + " × " + d, (V * d / 1e6).toFixed(2) + "M, связаны с lm_head", 0);
-    push("h₀", "(B, S, " + d + ")", "поток невязки", 0);
-    plan.forEach((step, t) => {
-      const pre = [];
-      if (c.input_injection) pre.push("h ← h + h₀");
-      if (c.step_cond) pre.push("h ← h + step_emb[" + t + "]");
-      if (pre.length) push("инъекция", pre.join(", "), "", 1);
-      push("шаг " + (t + 1), "блоки " + step.map(i => "f" + i).join(" → "), "", 1);
-      if (c.loop_norm) push("RMSNorm", "(" + d + ")", "между лупами", 1);
-    });
-    push("RMSNorm", "(" + d + ")", "", 0);
-    push("lm_head", d + " × " + V, "веса общие с Embedding", 0);
-    push("logits", "(B, S, " + V + ")", "", 0);
-
-    const g = el("svg", {width: W, height: rows.length * rowH + 20});
-    rows.forEach(([t, sub, note, ind], i) => {
-      const y = 10 + i * rowH, x = 20 + ind * 26;
-      g.appendChild(el("rect", {x: x, y: y, width: 200, height: 20, rx: 4,
-        fill: ind ? "none" : "var(--line)", stroke: "var(--line)"}));
-      g.appendChild(el("text", {x: x + 8, y: y + 14, class: "tick",
-        style: "font-size:12px; fill:var(--fg)"}, [t]));
-      g.appendChild(el("text", {x: x + 215, y: y + 14, class: "tick"}, [sub]));
-      g.appendChild(el("text", {x: x + 430, y: y + 14, class: "tick"}, [note]));
-      if (i) g.appendChild(el("line", {x1: x + 10, y1: y, x2: x + 10, y2: y - 6, class: "ax"}));
-    });
-    box.textContent = "";
-    box.appendChild(el("div", {class: "card"}, [g]));
-
-    const blk = el("table", {}, [el("tr", {}, ["часть", "форма", "параметров"].map(h => el("th", {}, [h])))]);
-    const parts = [["RMSNorm ×2", "(" + d + ")", 2 * d],
-      ["Attention qkv", d + " → " + 3 * d, 3 * d * d],
-      ["Attention proj", d + " → " + d, d * d],
-      ["QK-norm", "(" + hd + ") ×2", 2 * hd],
-      ["SwiGLU gate/up", d + " → " + ff + " ×2", 2 * d * ff],
-      ["SwiGLU down", ff + " → " + d, ff * d]];
-    let tot = 0;
-    for (const [n, sh, np] of parts) {
-      tot += np;
-      blk.appendChild(el("tr", {}, [n, sh, np.toLocaleString("ru")].map(v => el("td", {}, [v]))));
-    }
-    blk.appendChild(el("tr", {}, ["один блок f", "", tot.toLocaleString("ru")].map(v => el("td", {}, [el("b", {}, [v])]))));
-    blk.appendChild(el("tr", {}, ["× " + c.n_layers + " блоков", "",
-      (tot * c.n_layers).toLocaleString("ru")].map(v => el("td", {}, [v]))));
-    box.appendChild(blk);
-  }
-  sel.onchange = arch;
-  arch();
-}
-
-// --- 2. кривые обучения
-{
-  app.appendChild(el("h2", {}, ["Обучение при равном бюджете токенов"]));
-  app.appendChild(el("p", {class: "note"}, ["Ось y логарифмическая. Один и тот же токенизатор, "
-    + "одни и те же токены, различается только схема лупинга."]));
-  const s = runs.map(r => ({pts: DATA.runs[r].history.map(h => [h.tokens / 1e6, h.val_ppl])}));
-  app.appendChild(legend(runs));
-  app.appendChild(card("val perplexity", "млн токенов", chart(s, {w: 560, h: 260, log: true})));
-}
-
-// --- 3. метрики по лупам, с ползунком по обучению
-{
-  app.appendChild(el("h2", {}, ["Состояние по шагам лупа"]));
-  app.appendChild(el("p", {class: "note"}, ["Цвет — момент обучения: светлое рано, тёмное поздно. "
-    + "Ползунок подсвечивает один снимок."]));
-  const sel = el("select", {}, runs.filter(r => DATA.runs[r].diag.length).map(r => el("option", {}, [r])));
-  const slider = el("input", {type: "range", min: 0, max: 0, value: 0, style: "width:260px"});
-  const label = el("span", {class: "note"}, [""]);
-  app.appendChild(el("div", {class: "ctl"}, [sel, slider, label]));
-  const box = el("div", {class: "grid"});
-  app.appendChild(box);
-
-  const KEYS = [["spectral_radius", "ρ(J) — сжимает шаг или расширяет; ниже 1 есть неподвижная точка"],
-                ["rel_step", "‖Δh‖/‖h‖ — сходится ли к неподвижной точке"],
-                ["cos_prev", "cos(Δh_t, Δh_{t-1}) — новое движение или то же самое"],
-                ["cos_useful", "cos(Δh, −∂L/∂h) — полезен ли шаг"],
-                ["h_norm", "‖h‖ — растёт ли поток невязки"],
-                ["eff_rank", "эффективный ранг"],
-                ["intrinsic_dim", "внутренняя размерность, TwoNN"],
-                ["grad_in", "‖∂L/∂h‖ на входе шага — затухание через повторы"],
-                ["kl_to_final", "KL(p_t ‖ p_финал) — когда предсказание замирает"],
-                ["top1_changed", "доля токенов, у которых top-1 ещё изменится"],
-                ["entropy", "энтропия softmax"],
-                ["top1_prob", "вероятность top-1"],
-                ["loss", "лосс при выходе на этом шаге"]];
-
-  function draw(reset) {
-    const d = DATA.runs[sel.value].diag;
-    slider.max = d.length - 1;
-    if (reset) slider.value = d.length - 1;
-    const cur = Math.min(+slider.value, d.length - 1);
-    label.textContent = "шаг " + d[cur].step + " · " + fmt(d[cur].tokens / 1e6) + "M токенов";
-    box.textContent = "";
-    for (const [k, title] of KEYS) {
-      const series = d.map((snap, i) => ({
-        pts: snap.rows.map(r => [r.step, r[k]]).filter(p => p[1] != null),
-        color: i === cur ? PAL[0] : "#888", w: i === cur ? 2.2 : 1,
-        o: i === cur ? 1 : 0.12 + 0.5 * i / Math.max(d.length - 1, 1)}));
-      box.appendChild(card(k, title, chart(series, {})));
-    }
-  }
-  sel.onchange = () => draw(true);
-  slider.oninput = () => draw(false);
-  draw(true);
-}
-
-// --- 3b. готовый чекпойнт: спектральный радиус, один шаг против двух, траектория
-{
-  const withFinal = runs.filter(r => DATA.runs[r].final);
-  if (withFinal.length) {
-    app.appendChild(el("h2", {}, ["Готовый чекпойнт: сжимает ли отображение"]));
-    app.appendChild(el("p", {class: "note"}, ["ρ(J) — спектральный радиус якобиана шага, "
-      + "степенной метод. Ниже 1 — сжатие, теорема Банаха гарантирует единственную "
-      + "неподвижную точку и геометрическую сходимость, и тогда лишние лупы ничего "
-      + "нового дать не могут. Выше 1 — состояние продолжает двигаться."]));
-    const sel = el("select", {}, withFinal.map(r => el("option", {}, [r])));
-    app.appendChild(el("div", {class: "ctl"}, [sel]));
-    const box = el("div", {class: "grid"});
-    app.appendChild(box);
-
-    function draw() {
-      const f = DATA.runs[sel.value].final;
-      box.textContent = "";
-      box.appendChild(card("ρ(J)", "спектральный радиус шага, лог",
-        chart([{pts: f.rows.map(r => [r.step, r.spectral_radius])}], {log: true})));
-      const ovt = f.one_vs_two || [];
-      if (ovt.length) {
-        box.appendChild(card("cos(Δ₁, Δ₂)", "один шаг против двух из того же состояния",
-          chart([{pts: ovt.map(r => [r.step, r.cos_one_two])}], {})));
-        box.appendChild(card("KL(p₂ ‖ p₁)", "насколько второй шаг меняет предсказание",
-          chart([{pts: ovt.map(r => [r.step, r.kl_one_two])}], {log: true})));
-        box.appendChild(card("лосс: 1 шаг и 2 шага", "ниже — лучше",
-          chart([{pts: ovt.map(r => [r.step, r.loss_one])},
-                 {pts: ovt.map(r => [r.step, r.loss_two])}], {})));
-      }
-      const wp = f.warp;
-      if (wp) {
-        const n = wp.axis.length;
-        for (const key of Object.keys(wp).filter(k => k.startsWith("step")).slice(0, 3)) {
-          const pts = wp[key], lines = [];
-          for (let i = 0; i < n; i++) {
-            lines.push({pts: pts.slice(i * n, i * n + n), w: 1});
-            lines.push({pts: Array.from({length: n}, (_, j) => pts[j * n + i]), w: 1});
-          }
-          box.appendChild(card("деформация плоскости, " + key,
-            "сетка вокруг одной позиции после " + key.slice(4) + " шагов",
-            chart(lines.map(l => ({...l, color: "#2b6cb0"})), {})));
-        }
-        const lines0 = [];
-        for (let i = 0; i < n; i++) {
-          lines0.push({pts: wp.start.slice(i * n, i * n + n), w: 1, color: "#888"});
-          lines0.push({pts: Array.from({length: n}, (_, j) => wp.start[j * n + i]), w: 1, color: "#888"});
-        }
-        box.appendChild(card("исходная сетка", "до применения блока", chart(lines0, {})));
-      }
-      for (const [key, title, sub] of [["traj_drift", "траектория вдоль ухода",
-          "ось 1 — суммарное смещение, ось 2 — остаток последнего шага"],
-          ["traj_pca", "траектория в PCA", "главные компоненты по токенам"]]) {
-        const tr = f[key];
-        if (!tr) continue;
-        const nTok = tr[0].length;
-        const series = [];
-        for (let t = 0; t < nTok; t++) series.push({pts: tr.map(st => st[t]), w: 1.2});
-        box.appendChild(card(title, sub, chart(series, {})));
-      }
-    }
-    sel.onchange = draw;
-    draw();
-  }
-}
-
-// --- 4. градиент по блокам во время обучения
-{
-  app.appendChild(el("h2", {}, ["Градиент по блокам за время обучения"]));
-  app.appendChild(el("p", {class: "note"}, ["Один и тот же блок применяется на каждом лупе, "
-    + "поэтому вопрос не «затухает ли по глубине», а «достаётся ли сигнал каждому из блоков»."]));
-  const box = el("div", {class: "grid"});
-  for (const r of runs) {
-    const d = DATA.runs[r].diag;
-    if (!d.length) continue;
-    const keys = Object.keys(d[0]).filter(k => k.startsWith("grad_block"));
-    const s = keys.map(k => ({pts: d.map(x => [x.tokens / 1e6, x[k]])}));
-    box.appendChild(card(r, "млн токенов, лог", chart(s, {log: true})));
-  }
-  app.appendChild(box);
-  app.appendChild(legend(["block0", "block1", "block2", "block3"]));
-}
-</script>
+STYLE = """
+body{font:14px/1.45 -apple-system,system-ui,sans-serif;max-width:1180px;margin:auto;padding:24px;color:#18202a;background:#fafafa}
+h1{font-size:22px}h2{font-size:17px;margin-top:30px}.muted{color:#657080}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
+.card{background:white;border:1px solid #dfe3e8;border-radius:8px;padding:12px;overflow:auto}.flow{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.box{border:1px solid #8aa4c0;border-radius:5px;padding:7px 9px;background:#edf5fc}.arrow{color:#657080}
+table{border-collapse:collapse;width:100%;font-size:12px}th,td{padding:5px 8px;border-bottom:1px solid #e7eaee;text-align:right}th:first-child,td:first-child{text-align:left}select{padding:4px}svg{width:100%;height:220px}.axis{stroke:#c7cdd4}.line{fill:none;stroke-width:2}.point{r:3}a{color:#1769aa}
 """
 
 
-def collect(root):
-    from model import loop_plan
+SCRIPT = r"""
+const D=__DATA__, colors=['#1769aa','#c45428','#2f855a','#7b4ab0','#b83280'];
+const el=(t,a={},x=[])=>{const n=document.createElementNS(['svg','line','path','circle','text'].includes(t)?'http://www.w3.org/2000/svg':'http://www.w3.org/1999/xhtml',t);Object.entries(a).forEach(([k,v])=>n.setAttribute(k,v));x.forEach(c=>n.append(c.nodeType?c:document.createTextNode(c)));return n};
+function chart(series,xkey,ykey){const points=series.flatMap(s=>s.rows.map(r=>[r[xkey],r[ykey]])).filter(p=>Number.isFinite(p[0])&&Number.isFinite(p[1]));const svg=el('svg');if(!points.length)return svg;let xs=points.map(p=>p[0]),ys=points.map(p=>p[1]),x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(...ys),y1=Math.max(...ys);if(x0===x1)x1++;if(y0===y1){y0-=.5;y1+=.5}const X=x=>40+(x-x0)/(x1-x0)*520,Y=y=>195-(y-y0)/(y1-y0)*170;svg.setAttribute('viewBox','0 0 580 220');svg.append(el('line',{x1:40,y1:195,x2:560,y2:195,class:'axis'}),el('line',{x1:40,y1:20,x2:40,y2:195,class:'axis'}));series.forEach((s,i)=>{const pts=s.rows.filter(r=>Number.isFinite(r[xkey])&&Number.isFinite(r[ykey]));const d=pts.map((r,j)=>(j?'L':'M')+X(r[xkey])+' '+Y(r[ykey])).join(' ');svg.append(el('path',{d,class:'line',stroke:colors[i%colors.length]}));pts.forEach(r=>svg.append(el('circle',{cx:X(r[xkey]),cy:Y(r[ykey]),class:'point',fill:colors[i%colors.length]})))});svg.append(el('text',{x:42,y:15},[y1.toFixed(3)]),el('text',{x:42,y:212},[x0.toFixed(1)]),el('text',{x:530,y:212},[x1.toFixed(1)]));return svg}
+function card(title,node){return el('div',{class:'card'},[el('b',{},[title]),node])}
+const app=document.querySelector('#app'), runs=Object.values(D.runs);
+app.append(el('h2',{},['Архитектура']),...runs.map(r=>{const m=r.config.model,d=m.d_model;let nodes=m.method==='huginn'?[`Embedding × √${d}`,`Prelude ${m.n_prelude} → e`,`s₀ ~ TruncNormal`,`Concat [s,e] → ${d}`,`Qwen3 core ${m.n_core} + RMSNorm × r`,`Coda ${m.n_coda}`]:[`Embedding (${d})`,`Qwen3 blocks ${m.n_core} × 1`];nodes.push(`RMSNorm → tied head (${m.vocab_size})`);const flow=el('div',{class:'flow'},nodes.flatMap((n,i)=>i?[el('span',{class:'arrow'},['→']),el('span',{class:'box'},[n])]:[el('span',{class:'box'},[n])]));const links=el('p',{class:'muted'},Object.entries(r.artifacts).flatMap(([name,path],i)=>[...(i?[' · ']:[]),el('a',{href:path},[name])]));return card(r.tag,el('div',{},[flow,links]))}));
+app.append(el('h2',{},['Обучение']),card('Selection perplexity по токенам',chart(runs.map(r=>({rows:r.history.map(x=>({tokens:x.tokens/1e6,ppl:x.ppl}))})),'tokens','ppl')));
+const selector=el('select',{},runs.map((r,i)=>el('option',{value:i},[r.tag]))),snap=el('select'),panel=el('div');app.append(el('h2',{},['Held-out пример и recurrent states']),el('div',{},[selector,snap]),panel);
+function draw(){const r=runs[+selector.value],s=r.diag[+snap.value];panel.replaceChildren();if(!s)return;panel.append(el('p',{class:'muted'},[`train step ${s.step}. Source tensors: `]),el('a',{href:s.tensor_path},[s.tensor_path]));panel.append(card('Вход',el('div',{},[s.text])));const grid=el('div',{class:'grid'});grid.append(card('Норма шага',chart([{rows:s.rows}],'step','delta_norm')),card('Cosine соседних шагов',chart([{rows:s.rows}],'step','delta_cosine')),card('Token-level KL соседних шагов',chart([{rows:s.rows}],'step','token_kl')),card('Loss по шагам',chart([{rows:s.rows}],'step','token_loss')),card('Градиент по recurrent state',chart([{rows:s.rows}],'step','state_grad')));if(s.trajectory)grid.append(card('Общая baseline projection',chart(s.trajectory.map((rows,i)=>({rows:rows.map((p,step)=>({step,x:p[0],y:p[1]}))})),'x','y')));panel.append(grid);panel.append(el('h3',{},['Decoded prediction по шагам']),el('ol',{},s.decoded_predictions.map(x=>el('li',{},[x]))));const ab=el('table',{},[el('tr',{},['step','intervention','loss','KL к исходному'].map(x=>el('th',{},[x]))),...s.ablations.map(x=>el('tr',{},[x.step,x.intervention,x.loss.toFixed(4),x.kl_to_original.toFixed(4)].map(v=>el('td',{},[String(v)]))))]);panel.append(el('h3',{},['Причинные абляции']),ab);const tok=el('table',{},[el('tr',{},['pos','input','target','prediction','loss','exit depth'].map(x=>el('th',{},[x]))),...s.tokens.map(x=>el('tr',{},[x.position,x.input,x.target,x.prediction,x.loss.toFixed(3),x.exit_depth].map(v=>el('td',{},[String(v)]))))]);panel.append(el('h3',{},['Все позиции примера']),tok)}
+function snaps(){snap.replaceChildren(...runs[+selector.value].diag.map((s,i)=>el('option',{value:i},[`step ${s.step}`])));snap.value=Math.max(0,snap.options.length-1);draw()}selector.onchange=snaps;snap.onchange=draw;snaps();
+"""
 
+
+def collect(root: Path, out: Path, tags=None):
+    projection_path = root / "projection.pt"
+    projection = torch.load(projection_path, map_location="cpu", weights_only=False) if projection_path.exists() else None
     runs = {}
-    for path in sorted(pathlib.Path(root).glob("*/history.json")):
-        blob = json.loads(path.read_text())
-        cfg = blob["config"]
-        diag = []
-        jsonl = path.parent / "diag.jsonl"
-        if jsonl.exists():
-            diag = [json.loads(line) for line in jsonl.read_text().splitlines() if line.strip()]
-        plan = loop_plan(cfg["n_layers"], cfg["n_loops"],
-                         cfg.get("loop_scheme", "stack"), cfg.get("group_size", 2))
-        final = path.parent / "diag.json"
-        blob["final"] = json.loads(final.read_text()) if final.exists() else None
-        vocab = round(blob["params"]["total"] - blob["params"]["non_embedding"]) // cfg["d_model"]
-        runs[path.parent.name] = {**blob, "diag": diag, "plan": plan, "vocab_size": vocab}
-    return {"runs": runs}
+    for config_path in sorted(root.glob("*/config.json")):
+        if not tags and config_path.parent.name.startswith("_"):
+            continue
+        if tags and config_path.parent.name not in tags:
+            continue
+        config = json.loads(config_path.read_text())
+        history_path = config_path.parent / "history.json"
+        diag_path = config_path.parent / "diag.jsonl"
+        snapshots = [json.loads(line) for line in diag_path.read_text().splitlines()] if diag_path.exists() else []
+        for snapshot in snapshots:
+            snapshot["tensor_path"] = os.path.relpath(snapshot["tensor_path"], out.parent)
+            if projection:
+                raw = torch.load(config_path.parent / "snapshots" / f"step{snapshot['step']:06d}.pt",
+                                 map_location="cpu", weights_only=False)
+                snapshot["trajectory"] = []
+                for position in range(min(8, raw["states"][0].shape[1])):
+                    points = [((state[0, position].float() - projection["mean"]) @
+                               projection["basis"]).tolist() for state in raw["states"]]
+                    snapshot["trajectory"].append(points)
+        runs[config_path.parent.name] = {
+            "tag": config_path.parent.name, "config": config,
+            "history": json.loads(history_path.read_text()) if history_path.exists() else [],
+            "diag": snapshots,
+            "artifacts": {name: os.path.relpath(config_path.parent / filename, out.parent)
+                          for name, filename in (("config", "config.json"), ("log", "metrics.jsonl"),
+                                                 ("best checkpoint", "best.pt"),
+                                                 ("last checkpoint", "last.pt"),
+                                                 ("diagnostics", "diag.jsonl"))},
+        }
+    return {"runs": runs, "projection_source": projection.get("source") if projection else None}
 
 
-SHAPE = ("tokenizer", "d_model", "n_heads", "n_kv_heads", "head_dim", "n_layers", "d_ff")
-
-
-def same_shape(runs):
-    """Keep only the runs whose architecture matches the newest one.
-
-    Perplexities from different shapes or different tokenizers sit on the same axis
-    and look comparable. They are not, and a plot that mixes them is worse than no
-    plot — so the mixing is refused rather than annotated.
-    """
-    def shape(run):
-        return tuple(run["config"].get(k) for k in SHAPE)
-
-    if not runs:
-        return runs
-    newest = max(runs, key=lambda tag: runs[tag]["history"][-1]["step"] if runs[tag]["history"] else 0)
-    keep = {tag: run for tag, run in runs.items() if shape(run) == shape(runs[newest])}
-    dropped = sorted(set(runs) - set(keep))
-    if dropped:
-        print(f"отброшены прогоны другой архитектуры: {', '.join(dropped)}")
-    return keep
-
-
-def main():
-    p = argparse.ArgumentParser()
-    p.add_argument("--runs", default="runs")
-    p.add_argument("--out", default="runs/report.html")
-    p.add_argument("--only", nargs="+", default=None, help="какие прогоны показывать")
-    p.add_argument("--all-shapes", action="store_true",
-                   help="не отбрасывать прогоны другой архитектуры")
-    args = p.parse_args()
-
-    data = collect(args.runs)
-    if args.only:
-        data["runs"] = {k: v for k, v in data["runs"].items() if k in args.only}
-    if not args.all_shapes:
-        data["runs"] = same_shape(data["runs"])
-    out = pathlib.Path(args.out)
-    out.write_text(TEMPLATE.replace("__DATA__", json.dumps(data)))
-    print(f"{len(data['runs'])} прогонов -> {out}")
+def render(out: Path = Path("runs/report.html"), tags=None):
+    payload = collect(Path("runs"), out, tags)
+    html = (f"<meta charset='utf-8'><title>Looped models</title><style>{STYLE}</style>"
+            "<h1>Looped models: clean preliminary runs</h1>"
+            f"<p class='muted'>Одна projection basis: {payload['projection_source'] or 'ещё не построена'}.</p>"
+            "<div id='app'></div><script>" + SCRIPT.replace("__DATA__", json.dumps(payload)) + "</script>")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(html)
+    return out
 
 
 if __name__ == "__main__":
-    main()
+    print(render())

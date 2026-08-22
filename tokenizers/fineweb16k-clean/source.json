@@ -1,0 +1,9 @@
+{
+  "dataset": "HuggingFaceFW/fineweb",
+  "subset": "sample-10BT",
+  "revision": "9bb295ddab0e05d785b879661af7260fed5140fc",
+  "document_indices": [
+    2000,
+    202000
+  ]
+}

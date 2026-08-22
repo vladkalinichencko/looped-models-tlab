@@ -1,51 +1,41 @@
-"""Val perplexity of a checkpoint, optionally swept over the number of loops.
+"""Evaluate one checkpoint at fixed recurrent depths on a named clean split."""
 
-    python eval.py runs/loop4/ckpt.pt
-    python eval.py runs/loop4/ckpt.pt --loops 1 2 4 8 16 32
-
-The loop sweep is the interesting plot for this task: where does the extra compute
-stop paying off, and does it ever start hurting?
-"""
-
-import argparse
 import json
 import math
-import os
-import pathlib
+from pathlib import Path
+import sys
 
 import torch
 
+import data
 import diag
-from train import evaluate, pick_device
+from train import Config, fixed_rng, pick_device
 
 
-def main():
-    p = argparse.ArgumentParser()
-    p.add_argument("ckpt")
-    p.add_argument("--loops", type=int, nargs="+", default=None)
-    p.add_argument("--val-batches", type=int, default=20)
-    p.add_argument("--batch-size", type=int, default=16)
-    p.add_argument("--device", default="auto")
-    args = p.parse_args()
-
-    device = pick_device(args.device)
-    model, blob = diag.load(args.ckpt, device)
-    cfg = model.cfg
-    # те же батчи, что и у диагностики, из кэша: иначе каждый эвал заново тянет FineWeb
-    val = diag.val_batches(blob, cfg, args.batch_size, args.val_batches, device)
-
+@torch.no_grad()
+def evaluate_checkpoint(checkpoint: Path, prepared, split: str = "selection",
+                        recurrences=(1, 2, 4, 8, 16)):
+    model, blob = diag.load(checkpoint, pick_device())
+    cfg = Config(**blob["training_config"])
     rows = []
-    for n in args.loops or [cfg.n_loops]:
-        loss = evaluate(model, val, n_loops=n)
-        rows.append({"n_loops": n, "val_loss": loss, "val_ppl": math.exp(loss)})
-        print(f"loops={n:>3}  val loss {loss:.4f}  ppl {math.exp(loss):.2f}")
-
-    out = pathlib.Path(args.ckpt).parent / "eval.json"
-    out.write_text(json.dumps({"ckpt": args.ckpt, "trained_loops": cfg.n_loops,
-                               "rows": rows}, indent=2))
-    print(f"-> {out}")
+    for steps in recurrences:
+        with fixed_rng(str(next(model.parameters()).device), cfg.seed + 10_000):
+            losses = [model(x, y, steps=steps)[1].item()
+                      for x, y in data.batches(prepared[split], cfg.batch_size,
+                                               next(model.parameters()).device)]
+        loss = sum(losses) / len(losses)
+        rows.append({"recurrence": steps, "loss": loss, "ppl": math.exp(loss)})
+    out = checkpoint.parent / f"eval_{split}.json"
+    out.write_text(json.dumps({"checkpoint": str(checkpoint), "split": split,
+                               "rows": rows}, indent=2) + "\n")
+    return rows
 
 
 if __name__ == "__main__":
-    main()
-    os._exit(0)
+    checkpoint = Path(sys.argv[1] if len(sys.argv) > 1 else "runs/huginn-preliminary/best.pt")
+    _, blob = diag.load(checkpoint)
+    train_cfg = Config(**blob["training_config"])
+    prepared, _ = data.prepare(data.tokenizer(), data.Config(
+        seq_len=train_cfg.seq_len, batch_size=train_cfg.batch_size, train_tokens=train_cfg.tokens))
+    for row in evaluate_checkpoint(checkpoint, prepared):
+        print(row)

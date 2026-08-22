@@ -1,6 +1,3 @@
 torch
 transformers
 datasets
-matplotlib
-tqdm
-mlflow

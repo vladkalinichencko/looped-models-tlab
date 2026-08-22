@@ -86,61 +86,65 @@ LLM умеют решать сложные открытые математиче
 
 ---
 
-Идеи владельца находятся в [`OWNER_NOTES.md`](../OWNER_NOTES.md). Предыдущий рабочий
-журнал сохранён в [`tmp/NOTES_legacy.md`](tmp/NOTES_legacy.md); его результаты
-переносятся в активную таблицу только после проверки.
+## Общий контракт
 
-## Граница
+| поле | правило |
+|---|---|
+| данные | `HuggingFaceFW/fineweb`, `sample-10BT`, revision `9bb295d`; selection использует document indices 0:200, final-validation 200:2000, train начинается с 2000; фактически использованные document IDs сохраняются в manifest каждого token cache |
+| tokenizer | один 16k ByteLevel-BPE `tokenizers/fineweb16k-clean` обучается на 200k train documents начиная с index 2000; selection и final-validation не участвуют ни в обучении BPE, ни в обучении модели |
+| модель | уменьшенный Qwen3: 4 физических блока, \(d=384\), 6 query heads, 3 KV heads, head dim 128, \(d_{ff}=1152\), RoPE, QK-norm, GQA, SwiGLU, pre-norm RMSNorm и tied embeddings; сравниваемые варианты не превышают 10M non-embedding параметров |
+| предварительный Mac | MPS, FP32, один и тот же seed и около 8M обработанных train-токенов; это проверка динамики на меньшем объёме, а не итоговый результат задания |
+| итоговый A100 | CUDA, bf16 autocast, один и тот же заранее записанный список seeds и одинаковый бюджет не более 100M train-токенов для всех выбранных вариантов |
+| оптимизация | AdamW, \(\beta=(0.9,0.95)\), weight decay 0.1 только для матриц, gradient clipping 1.0; LR 3e-3, 200 warmup steps, cosine decay до 3e-4 |
+| остановка обучения | фиксированный бюджет токенов без metric-based early stopping; сохраняются лучший selection-checkpoint и checkpoint последнего шага |
+| оценка | selection использует первые 17 полных batches, то есть 272 блока и 139,264 target-токена; он выбирает вариант и checkpoint; final-validation запускается один раз после выбора; основной результат — perplexity, fixed-depth и adaptive-exit оцениваются раздельно |
+| сравнение | одинаковые data manifests, tokenizer, модельный бюджет, train tokens, seeds, optimizer и scheduler; рядом с token-matched результатом указываются число применений блоков и compute-matched контроль |
+| масштаб | ширину, глубину, число повторов и бюджет можно уменьшать под Mac или A100, но механизм метода сохраняется; исходное значение статьи, выбранное значение и причина записываются в строке эксперимента |
 
-Мы проверяем способы повторного применения общего блока при одинаковом числе
-обучающих токенов. Численные масштабы статьи можно уменьшать под модель до 10M
-параметров, если механизм сохраняется и оба значения записаны в таблице.
+## Диагностика
 
-Текущий общий путь: `model.py` задаёт модель и `LoopedLM.trace`, `train.py` обучает,
-`diag.py` читает тот же trace, `eval.py` оценивает чекпойнт. Shell-скрипты и большой
-набор CLI-флагов будут заменены именованными Python-конфигурациями.
+- Один фиксированный clean held-out набор из selection split показывает исходный текст, token IDs, targets и decoded prediction каждого варианта на тех же позициях; final-validation остаётся закрытым до итоговой оценки.
+- Для каждого loop step и checkpoint сохраняются recurrent state \(h_t\), приращение \(\Delta h_t=h_{t+1}-h_t\), logits, token-level loss и \(KL(p_t\|p_{t+1})\). Рядом с общей 2D-проекцией показываются нормы шагов и cosine соседних шагов в полном пространстве.
+- Одна PCA projection basis обучается на clean selection states лучшего baseline-checkpoint и затем без переобучения используется для сравнения loop steps, checkpoints и вариантов; выводы проверяются величинами в полном пространстве.
+- Градиент \(\partial L/\partial h_t\) сохраняется на повторах, через которые должен идти backprop. Reset, zero, freeze и пропуск отдельных повторов проверяют причинную роль recurrent state и каждого шага.
+- Для раннего выхода показываются exit depth каждого токена, prediction на момент выхода, fixed-depth контроль и характерные failure cases.
+- Каждый содержательный запуск создаёт HTML со схемой блоков и shapes, а также ссылками на checkpoint, Python-конфиг, лог и сохранённые тензоры или JSON. Jacobian, spectrum, rank и manifold-графики добавляются только вместе с конкретной гипотезой, формулой и причинной абляцией. LR, parameter groups и shape asserts остаются проверкой проводки запуска.
 
 ## Эксперименты
 
-`предварительный` означает один seed или уменьшенный бюджет. `невалидный` означает,
-что запуск не отвечает записанному протоколу и ничего не говорит о методе.
+Все варианты используют одну реализацию Qwen3-блока и один train/eval/diagnostic path, меняя только указанный recurrent block, objective или stopping rule. Старые числа ниже сравнимы только внутри указанного старого протокола; новые clean прогоны заполнят колонки Mac, A100 и HTML.
 
-| эксперимент | основание | код | статус | запуск | результат | диагностика |
-|---|---|---|---|---|---|---|
-| один проход | baseline задания | `model.py` | предварительный | `loops1`, 25M токенов | val ppl 158.62 | [JSONL](logs/loops1_diag.jsonl) |
-| два прохода | baseline задания | `model.py` | невалидный для сравнения, старая архитектура | `loops2`, 25M токенов | val ppl 146.16 | [JSONL](logs/loops2_diag.jsonl) |
-| общий стек, 4 повтора | базовая рекуррентная схема | `model.py` | предварительный | `idea_base`, 8M, seed 0 | 362.1 | [лог](logs/idea_base.log) |
-| prelude/core/coda | [Huginn](https://arxiv.org/abs/2502.05171) | `model.py` | предварительный | `idea_prelude`, 8M, seed 0 | 294.8 | [лог](logs/idea_prelude.log) |
-| Huginn, масштаб 32/8 → 4/4 | [Huginn](https://arxiv.org/abs/2502.05171) | `model.py` | предварительный, соответствие механизма проверяется | `idea_huginn`, 8M, seed 0 | 322.5 | [лог](logs/idea_huginn.log) |
-| энтропия головы остановки | [Ouroboros](https://arxiv.org/abs/2510.25741) | `model.py` | предварительный | `idea_ouro`, 8M, seed 0 | 297.2 | [лог](logs/idea_ouro.log) |
-| инъекция сложением | идея владельца | `model.py` | предварительный | `idea_add`, 8M, seed 0 | 326.9 | [лог](logs/idea_add.log) |
-| повтор по слоям | идея владельца | `model.py` | предварительный | `idea_layer`, 8M, seed 0 | 343.0 | [лог](logs/idea_layer.log) |
-| глубокий надзор | идея владельца | `model.py` | предварительный | `idea_deep`, 8M, seed 0 | 343.7 | [лог](logs/idea_deep.log) |
-| повтор по группам | идея владельца | `model.py` | предварительный | `idea_group`, 8M, seed 0 | 356.0 | [лог](logs/idea_group.log) |
-| голова полезности шага | идея владельца | `model.py` | предварительный | `idea_progress`, 8M, seed 0 | 360.1 | [лог](logs/idea_progress.log) |
-| embedding номера шага | идея владельца | `model.py` | предварительный | `idea_step`, 8M, seed 0 | 403.9 | [лог](logs/idea_step.log) |
-| геометрический prior остановки | [PonderNet](https://arxiv.org/abs/2204.03276) | `model.py` | предварительный | `idea_ponder`, 8M, seed 0 | 416.0 | [лог](logs/idea_ponder.log) |
-| конкатенация с адаптером | абляция Huginn | `model.py` | предварительный | `idea_inject`, 8M, seed 0 | 529.1 | [лог](logs/idea_inject.log) |
-| нормализация между повторами | идея владельца | `model.py` | предварительный | `idea_norm`, 8M, seed 0 | 2002.8 | [лог](logs/idea_norm.log) |
-| compute-matched prelude | контроль для `idea_prelude` | `model.py` | не запущен | | | |
-| ранний выход по критерию статьи | [Huginn](https://arxiv.org/abs/2502.05171) | `model.py` | код не проверен | | | |
-| prelude + entropy exit + add | комбинация предварительных кандидатов | не реализован | не согласован | | | |
-
-## Диагностики
-
-- [x] Loss, val ppl и фактический конфиг по шагам.
-- [x] Скалярные нормы, косинусы, ранги, спектральный радиус и градиенты по повторам.
-- [ ] Реальные токены, top-k логиты и декодирование выхода каждого повтора.
-- [ ] Полные состояния и приращения выбранных токенов на общей временной шкале.
-- [ ] Градиенты тех же объектов по сохранённым checkpoint, а не только финальные нормы.
-- [ ] Compute-matched сравнение prelude и полного повторяемого стека.
-- [ ] Проверка раннего выхода на held-out данных.
-
-Текущий HTML находится в [`runs/report.html`](runs/report.html), но он ещё не показывает
-все объекты из списка выше.
-
-## Открытые вопросы
-
-- Пересобран ли текущий tokenizer после исключения validation-документов из обучения.
-- Сохраняет ли локальный Huginn весь алгоритм статьи после численного уменьшения.
-- Какие из предварительных вариантов владелец утверждает для полного запуска на A100.
+| эксперимент | механизм и происхождение | код | статус | данные | предварительный Mac | итоговый A100 | диагностика/HTML | лог |
+|---|---|---|---|---|---|---|---|---|
+| 1. Один проход Qwen3 | Четыре разных Qwen3-блока применяются один раз; recurrent state и early exit отсутствуют. Baseline задания. | [model.py](model.py), [run_preliminary.py](run_preliminary.py) | завершён, clean preliminary, seed 0 | [clean manifest](datasets/fineweb_06c0e26f662f_512_8000000.json), 7,995,392 train-токена | selection ppl 276.28; loss снижался 6.62 → 5.62 | — | [HTML](runs/baseline-clean-mac/report.html), [общая проекция](runs/report.html) | [метрики](runs/baseline-clean-mac/metrics.jsonl) |
+| 2. Два прохода общего стека | \(h_0\) равен token embeddings; один и тот же стек из четырёх блоков применяется дважды без повторной инъекции входа; final CE. Baseline задания. | [model.py](model.py) | завершён, старый протокол | FineWeb, старый BPE, 25M | val ppl 146.16 | — | — | [history](logs/loops2_history.json) |
+| 3. Общий стек, четыре повтора | \(h_0\) равен embeddings; общий стек повторяется четыре раза без инъекции; gradient и final CE идут через все повторы. Baseline схемы. | — | завершён, предварительный | FineWeb, старый BPE, 7,995,392 токена | val ppl 362.1 | — | — | [лог](logs/idea_base.log) |
+| 4. Повтор каждого слоя | Каждый Qwen3-блок применяется к текущему состоянию несколько раз до перехода к следующему; вход повторно не подаётся; final CE. Идея владельца. | — | завершён, предварительный | FineWeb, старый BPE, 7,995,392 токена | val ppl 343.0 | — | — | [лог](logs/idea_layer.log) |
+| 5. Повтор групп блоков | Группа из двух Qwen3-блоков является общей recurrent function и повторяется до следующей группы; final CE. Идея владельца. | — | завершён, предварительный | FineWeb, старый BPE, 7,995,392 токена | val ppl 356.0 | — | — | [лог](logs/idea_group.log) |
+| 6. Prelude, core и coda без инъекции | Один блок создаёт \(h_0\), два общих core-блока повторяются с fixed depth, один coda-блок декодирует состояние; final CE. Контроль для Huginn. | — | завершён, предварительный | FineWeb, старый BPE, 7,995,392 токена | val ppl 294.8 | — | — | [лог](logs/idea_prelude.log) |
+| 7. Локальная concat-рекурсия | Prelude output служит и \(h_0\), и неизменным входом \(e\); adapter получает \([h_t,e]\), затем повторяются два core-блока; depth lognormal-Poisson, gradient через последние четыре повтора, final CE. Локальный вариант. | — | завершён, предварительный | FineWeb, старый BPE, 7,995,392 токена | val ppl 322.5 | — | — | [лог](logs/idea_huginn.log) |
+| 8. Huginn recurrence adapted to Qwen3 | Qwen3 pre-norm сохраняется внутри слоёв. Prelude создаёт \(e\) из embeddings, масштабированных на \(\sqrt d\); независимое \(s_0\sim\operatorname{TruncNormal}(0,(2/5)I)\); \(s_{t+1}=N(R(A([s_t,e])))\), где \(N\) — core-end RMSNorm, затем coda. Параметр lognormal-Poisson равен 4, поэтому фактическое \(E[r]=5\) после \(+1\); первые \(r-4\) повторов выполняются без графа, gradient идёт через последние 4; обучает только final CE. [Huginn](https://arxiv.org/abs/2502.05171). | [model.py](model.py), [run_preliminary.py](run_preliminary.py) | завершён, clean preliminary, seed 0 | [clean manifest](datasets/fineweb_06c0e26f662f_512_8000000.json), 7,995,392 train-токена | selection ppl 236.11 при \(r=4\); 236.41 при \(r=1\), 236.13 при \(r=2\), после \(r=4\) улучшение меньше 0.0001 ppl | — | [HTML](runs/huginn-clean-mac/report.html), [общая проекция](runs/report.html) | [метрики](runs/huginn-clean-mac/metrics.jsonl), [fixed-depth](runs/huginn-clean-mac/eval_selection.json) |
+| 9. Глубина выше обучающей | Та же Huginn recurrence обучается на случайной глубине и оценивается на фиксированных глубинах выше типичной обучающей; state, injection, loss и gradient не меняются. Huginn и идея владельца. | — | запланирован | — | — | — | — | — |
+| 10. Concat injection без prelude и coda | \(h_0=e=Embedding(x)\); каждый повтор получает \(A([h_t,e])\), затем общий стек; fixed depth и final CE. Абляция concat injection. | — | завершён, предварительный | FineWeb, старый BPE, 7,995,392 токена | val ppl 529.1 | — | — | [лог](logs/idea_inject.log) |
+| 11. Add injection | На каждом повторе к recurrent state прибавляется неизменный исходный embedding; fixed depth, gradient через все повторы, final CE. Идея владельца. | — | завершён, предварительный | FineWeb, старый BPE, 7,995,392 токена | val ppl 326.9 | — | — | [лог](logs/idea_add.log) |
+| 12. Conditioning на номер повтора | К \(h_t\) добавляется обучаемый embedding номера шага перед общей recurrent function; fixed depth и final CE. Идея владельца. | — | завершён, предварительный | FineWeb, старый BPE, 7,995,392 токена | val ppl 403.9 | — | — | [лог](logs/idea_step.log) |
+| 13. Разные веса по фазам | Номер шага выбирает небольшой фиксированный набор shared recurrent functions; остальные части протокола не меняются. Идея владельца. | — | дизайн перед запуском | — | — | — | — | — |
+| 14. RMSNorm между повторами | После общей recurrent function состояние нормализуется перед следующим повтором; fixed depth и final CE. Идея из задания и владельца. | — | завершён, предварительный | FineWeb, старый BPE, 7,995,392 токена | val ppl 2002.8 | — | — | [лог](logs/idea_norm.log) |
+| 15. Compute-matched prelude control | Prelude/core/coda сравнивается с общим стеком при одинаковом числе применений Qwen3-блоков; recurrence и final CE не меняются. Контроль эксперимента 6. | — | запланирован | — | — | — | — | — |
+| 16. Локальная entropy-regularized exit head | Трёхслойная tanh-голова получает соседние состояния; локальный expected-loss objective дополняется entropy regularization. Локальный вариант. | — | завершён, предварительный | FineWeb, старый BPE, 7,995,392 токена | val ppl 297.2 | — | — | [лог](logs/idea_ouro.log) |
+| 17. Локальная exit head с geometric prior | Трёхслойная tanh-голова получает соседние состояния; локальный objective использует prior на глубину. Локальный вариант. | — | завершён, предварительный | FineWeb, старый BPE, 7,995,392 токена | val ppl 416.0 | — | — | [лог](logs/idea_ponder.log) |
+| 18. Ouro adaptive depth | Общий стек обновляет \(h_t\); linear gate от текущего состояния задаёт конечное распределение остановки с остатком на последнем шаге; expected token CE и entropy term обучают промежуточные шаги, Q-exit использует CDF. Ouro. | — | запланирован | — | — | — | — | — |
+| 19. PALBERT с Q-exit | Общий стек обновляет \(h_t\); трёхслойная tanh-голова получает \([h_t,h_{t-1}]\), posterior сопоставляется с geometric prior через KL, expected token CE обучает шаги, Q-exit использует CDF. PALBERT и Q-exit. | — | запланирован | — | — | — | — | — |
+| 20. Huginn KL-exit | Для текущего генерируемого токена сравниваются соседние predictions; выход происходит при \(KL(p_t\|p_{t+1})<5\cdot10^{-4}\), рядом оценивается fixed-depth контроль. Huginn. | — | запланирован после эксперимента 8 | — | — | — | — | — |
+| 21. Голова прогресса | Голова получает \([h_t,\Delta h_t]\) и предсказывает улучшение loss от следующего повтора; её regression loss добавляется к final CE, но глубина остаётся фиксированной. Идея владельца. | — | завершён, предварительный | FineWeb, старый BPE, 7,995,392 токена | val ppl 360.1 | — | — | [лог](logs/idea_progress.log) |
+| 22. Глубокий надзор | Final CE дополняется средним CE промежуточных predictions с локальным весом 0.3; recurrent state и fixed depth не меняются. Идея владельца. | — | завершён, предварительный | FineWeb, старый BPE, 7,995,392 токена | val ppl 343.7 | — | — | [лог](logs/idea_deep.log) |
+| 23. Progress objective | Взвешенные CE промежуточных шагов обучают каждый следующий повтор улучшать prediction; stopping rule добавляется только отдельным экспериментом. Идея владельца. | — | дизайн перед запуском | — | — | — | — | — |
+| 24. Geometry critic | Denoiser обучается восстанавливать clean recurrent states после шума; \(\|D(h_t)-h_t\|^2\) служит только training regularizer и не изменяет forward во время inference. Идея владельца. | — | после проверки гипотезы о выходе из clean-state области | — | — | — | — | — |
+| 25. Progress и geometry | Final CE, progress objective и geometry critic совместно обучают полезное продолжение траектории без inference-time denoising. Идея владельца. | — | после отдельных экспериментов 23 и 24 | — | — | — | — | — |
+| 26. Неколлинеарные приращения | Auxiliary objective различает направления соседних \(\Delta h_t\), пока final CE проверяет полезность каждого шага. Идея владельца. | — | дизайн перед запуском | — | — | — | — | — |
+| 27. Ограничение update map | Jacobian, Lipschitz, spectrum или energy ограничиваются только после гипотезы о локальной сжимаемости или расширении; recurrence и causal ablation задаются вместе с формулой. Идея владельца. | — | гипотеза перед запуском | — | — | — | — | — |
+| 28. Adaptive compute по изменению prediction | \(JS(p_t,p_{t+1})\) и \(\|J_t\Delta h_t\|\) оценивают, меняется ли ответ и влияет ли шаг на logits; правило остановки и порог фиксируются до запуска. Идея владельца. | — | дизайн перед запуском | — | — | — | — | — |
+| 29. Adaptive compute по trace Fisher | Expected gradient magnitude оценивает чувствительность prediction и управляет глубиной после заранее заданного правила остановки. Идея владельца. | — | дизайн перед запуском | — | — | — | — | — |
+| 30. Exploration внутри повторов | Шум или sampling меняет recurrent transition во время обучения; state, распределение шума, gradient path и inference rule фиксируются до запуска. Идея из задания. | — | дизайн перед запуском | — | — | — | — | — |
+| 31. Energy-based recurrent computation | Candidate prediction является recurrent state и уточняется gradient descent по learned energy; обучение дифференцирует через inner optimization. EBT. | — | отдельная архитектура после baseline | — | — | — | — | — |
+| 32. Fixed-point recurrent computation | \(z=F(z,x)\) решается fixed-point solver, вход \(x\) инжектируется в \(F\), gradient вычисляется implicit backward, остановка определяется tolerance. DEQ. | — | отдельный контроль после baseline | — | — | — | — | — |

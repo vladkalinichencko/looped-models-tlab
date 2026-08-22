@@ -1,13 +1,12 @@
-"""FineWeb -> packed (seq_len + 1) token blocks.
+"""Leak-free FineWeb tokenizer, document split, and reusable token blocks."""
 
-The stream order is deterministic, so val = the first `val_batches` batches and
-train = everything after them. Same split in train.py and eval.py, no leakage.
-
-    python data.py tokenizers/fineweb16k     # train the 16k BPE once, then reuse
-"""
-
-import argparse
+from dataclasses import asdict, dataclass
+import hashlib
 import itertools
+import json
+import math
+import os
+from pathlib import Path
 
 import torch
 from datasets import load_dataset
@@ -15,75 +14,100 @@ from transformers import AutoTokenizer
 
 DATASET = "HuggingFaceFW/fineweb"
 SUBSET = "sample-10BT"
+REVISION = "9bb295ddab0e05d785b879661af7260fed5140fc"
+TOKENIZER_DIR = Path("tokenizers/fineweb16k-clean")
+SELECTION = range(0, 200)
+FINAL = range(200, 2_000)
+TRAIN_START = 2_000
 
 
-def tokenizer(name):
-    tok = AutoTokenizer.from_pretrained(name)
-    return tok
+@dataclass(frozen=True)
+class Config:
+    seq_len: int = 512
+    batch_size: int = 16
+    train_tokens: int = 8_000_000
 
 
-def train_tokenizer(out, vocab_size=16384, n_docs=200_000, skip=2_000):
-    """Own ByteLevel BPE on FineWeb, starting after the validation region.
+def documents():
+    return load_dataset(DATASET, name=SUBSET, split="train", streaming=True, revision=REVISION)
 
-    Qwen3 ships a 151936-token vocabulary; tied embeddings alone would then be 78M
-    parameters at d_model=512, i.e. the whole budget is spent before the first block
-    and every step pays for a 152k-wide lm_head. A 16k vocabulary keeps both readings
-    of the 10M limit true at once (see NOTES).
 
-    `skip` steps over the head of the stream, which is exactly what `split` hands out
-    as validation. Training the vocabulary on the validation text is a mild leak — it
-    tunes the merges to that text and flatters val perplexity for every variant alike —
-    but it is free to avoid.
-    """
+def train_tokenizer(path: Path = TOKENIZER_DIR, n_docs: int = 200_000):
     from tokenizers import ByteLevelBPETokenizer
     from transformers import PreTrainedTokenizerFast
 
-    ds = load_dataset(DATASET, name=SUBSET, split="train", streaming=True)
+    chosen = itertools.islice(documents(), TRAIN_START, TRAIN_START + n_docs)
     bpe = ByteLevelBPETokenizer()
-    bpe.train_from_iterator((e["text"] for e in itertools.islice(ds, skip, skip + n_docs)),
-                            vocab_size=vocab_size, special_tokens=["<|endoftext|>"])
+    bpe.train_from_iterator((row["text"] for row in chosen), vocab_size=16_384,
+                            special_tokens=["<|endoftext|>"])
     tok = PreTrainedTokenizerFast(tokenizer_object=bpe, eos_token="<|endoftext|>")
-    tok.save_pretrained(out)
+    path.mkdir(parents=True, exist_ok=True)
+    tok.save_pretrained(path)
+    (path / "source.json").write_text(json.dumps({
+        "dataset": DATASET, "subset": SUBSET, "revision": REVISION,
+        "document_indices": [TRAIN_START, TRAIN_START + n_docs],
+    }, indent=2) + "\n")
     return tok
 
 
-def block_stream(tok, seq_len, cache_dir=None):
-    ds = load_dataset(DATASET, name=SUBSET, split="train", streaming=True, cache_dir=cache_dir)
-    eos = tok.eos_token_id
-    buf = []
-    for example in ds:
-        buf += tok(example["text"], add_special_tokens=False)["input_ids"]
-        if eos is not None:
-            buf.append(eos)
-        while len(buf) >= seq_len + 1:
-            yield buf[: seq_len + 1]
-            buf = buf[seq_len + 1 :]
+def tokenizer(path: Path = TOKENIZER_DIR):
+    if not (path / "tokenizer.json").exists():
+        return train_tokenizer(path)
+    return AutoTokenizer.from_pretrained(path)
 
 
-def batches(stream, batch_size, device):
-    batch = []
-    for block in stream:
-        batch.append(block)
-        if len(batch) == batch_size:
-            t = torch.tensor(batch, dtype=torch.long, device=device)
-            yield t[:, :-1], t[:, 1:]
-            batch = []
+def tokenizer_hash(path: Path = TOKENIZER_DIR) -> str:
+    return hashlib.sha256((path / "tokenizer.json").read_bytes()).hexdigest()[:12]
 
 
-def split(tok, seq_len, batch_size, val_batches, device, cache_dir=None):
-    """-> (val: list of (x, y), train: iterator of (x, y))."""
-    stream = batches(block_stream(tok, seq_len, cache_dir), batch_size, device)
-    val = [next(stream) for _ in range(val_batches)]
-    return val, stream
+def prepare(tok, cfg: Config):
+    key = f"fineweb_{tokenizer_hash()}_{cfg.seq_len}_{cfg.train_tokens}"
+    cache = Path("datasets") / f"{key}.pt"
+    manifest = Path("datasets") / f"{key}.json"
+    if cache.exists() and manifest.exists():
+        return torch.load(cache, weights_only=False), manifest
+
+    train_blocks = math.ceil(cfg.train_tokens / cfg.seq_len)
+    blocks = {name: [] for name in ("selection", "final", "train")}
+    ids = {name: [] for name in blocks}
+    buffers = {name: [] for name in blocks}
+
+    for index, row in enumerate(documents()):
+        name = "selection" if index in SELECTION else "final" if index in FINAL else "train"
+        if name == "train" and index < TRAIN_START:
+            continue
+        if name == "train" and len(blocks[name]) >= train_blocks:
+            break
+        ids[name].append(row["id"])
+        buffers[name].extend(tok(row["text"], add_special_tokens=False)["input_ids"])
+        buffers[name].append(tok.eos_token_id)
+        while len(buffers[name]) >= cfg.seq_len + 1 and (name != "train" or len(blocks[name]) < train_blocks):
+            blocks[name].append(buffers[name][:cfg.seq_len + 1])
+            del buffers[name][:cfg.seq_len + 1]
+
+    if len(blocks["train"]) != train_blocks or not blocks["selection"] or not blocks["final"]:
+        raise RuntimeError({name: len(rows) for name, rows in blocks.items()})
+
+    payload = {name: torch.tensor(rows, dtype=torch.long) for name, rows in blocks.items()}
+    cache.parent.mkdir(exist_ok=True)
+    torch.save(payload, cache)
+    manifest.write_text(json.dumps({
+        "dataset": DATASET, "subset": SUBSET, "revision": REVISION,
+        "tokenizer": str(TOKENIZER_DIR), "tokenizer_sha256": tokenizer_hash(),
+        "config": asdict(cfg), "documents": ids,
+    }, indent=2) + "\n")
+    return payload, manifest
+
+
+def batches(blocks: torch.Tensor, batch_size: int, device: str):
+    for start in range(0, len(blocks) - batch_size + 1, batch_size):
+        batch = blocks[start:start + batch_size].to(device)
+        yield batch[:, :-1], batch[:, 1:]
 
 
 if __name__ == "__main__":
-    p = argparse.ArgumentParser()
-    p.add_argument("out")
-    p.add_argument("--vocab-size", type=int, default=16384)
-    p.add_argument("--n-docs", type=int, default=200_000)
-    p.add_argument("--skip", type=int, default=2_000,
-                   help="пропустить голову потока — оттуда берётся валидация")
-    args = p.parse_args()
-    tok = train_tokenizer(args.out, args.vocab_size, args.n_docs, args.skip)
-    print(f"{len(tok)} tokens -> {args.out}")
+    tok = tokenizer()
+    payload, manifest = prepare(tok, Config())
+    print({name: list(value.shape) for name, value in payload.items()}, flush=True)
+    print(manifest, flush=True)
+    os._exit(0)  # Arrow can hang while shutting down its global thread pool on macOS.
