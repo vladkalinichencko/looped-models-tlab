@@ -362,7 +362,7 @@ activation memory растёт линейно по глубине лупа и о
 source .venv/bin/activate
 python data.py                       # кэш FineWeb и token blocks
 python run_preliminary.py            # Mac-прогоны baseline и Huginn
-python run_a100.py                   # итоговое сравнение, четыре варианта
+python train.py                      # финальный вариант отчёта
 python eval.py runs/huginn-clean-mac/best.pt
 python viz.py                        # самодостаточный HTML из JSON
 python make_figures.py               # рисунок из истории A100
