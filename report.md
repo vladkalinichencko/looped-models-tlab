@@ -358,22 +358,16 @@ activation memory растёт линейно по глубине лупа и о
 ## Воспроизводимость
 
 ```bash
-./setup.sh
-source .venv/bin/activate
-python data.py                       # кэш FineWeb и token blocks
-python run_preliminary.py            # Mac-прогоны baseline и Huginn
-python train.py                      # финальный вариант отчёта
-python eval.py runs/huginn-clean-mac/best.pt
-python viz.py                        # самодостаточный HTML из JSON
-python make_figures.py               # рисунок из истории A100
-```
-
-Артефакты A100 забираются из ClearML вместе с готовой строкой таблицы:
-
-```bash
-python fetch_a100.py <task_id> 24584192
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python data.py          # кэш FineWeb, чистый BPE и общие token blocks
+python train.py         # обучение финального варианта
+python eval.py runs/huginn/best.pt
+python viz.py           # самодостаточный HTML из сохранённых JSON
+python make_figures.py  # рисунок отчёта из истории прогонов
 ```
 
 Вся диагностика собрана в одной самодостаточной странице
 [runs/report.html](runs/report.html): тринадцать прогонов с общим селектором, включая
-финальные A100.
+финальные A100. Код оркестрации прогонов на кластере вынесен в отдельный репозиторий,
+чтобы здесь оставался только код, который относится к результатам этого отчёта.
