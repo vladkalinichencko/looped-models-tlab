@@ -41,8 +41,6 @@ AGENTS.md
 CLAUDE.md
 
 # сырые дампы диагностики: агрегаты уже вшиты в self-contained HTML
-runs/**/diag.jsonl
-runs/**/diag-best.json
 runs/**/snapshots/
 
 # smoke-прогоны: проверяли только проводку кода, выводы перенесены в отчёт

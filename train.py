@@ -178,3 +178,17 @@ def train(model: LoopedLM, prepared: dict[str, torch.Tensor], manifest: Path,
               "best_selection_loss": best, "best_selection_ppl": math.exp(best), **runtime}
     write_json(out / "run.json", result)
     return result
+
+
+if __name__ == "__main__":
+    import data
+    from model import Config as ModelConfig, LoopedLM
+
+    # Финальный вариант отчёта: Huginn с 16 повторами на бюджете задания.
+    tok = data.tokenizer()
+    prepared, manifest = data.prepare(tok, data.Config(train_tokens=50_000_000))
+    model_cfg = ModelConfig(vocab_size=len(tok), method="huginn", n_prelude=1, n_core=2,
+                            n_coda=1, mean_recurrence=16, backprop_last=4)
+    torch.manual_seed(0)
+    print(train(LoopedLM(model_cfg), prepared, manifest, tok,
+                TrainConfig(tag="huginn", tokens=50_000_000, eval_every=250)))

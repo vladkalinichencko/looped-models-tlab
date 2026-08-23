@@ -311,8 +311,8 @@ selection CE ухудшается до 8.530. В сохранённых коор
 остался некалиброванный вариант, а радиальный рост так и не доказан как причина
 плохого качества. Калиброванный вариант я оставил геометрическим контролем.
 
-Артефакты: [затухание 0](runs/antisymmetric-mac-r16/report.html),
-[затухание 0.196](runs/antisymmetric-calibrated-mac-r16/report.html).
+Артефакты: [затухание 0](runs/report.html),
+[затухание 0.196](runs/report.html).
 
 ### Контроллер: teacher обучается, полезной динамики нет
 
@@ -331,8 +331,8 @@ cosine неизбежно приближается к единице. Миним
 тот же objective к приращениям \(f_k(h)-h\), а не к полным состояниям; это и есть точка
 стыковки с антисимметричным переходом.
 
-Артефакты: [вес 0](runs/controller-teacher-mac-r16-mu0/report.html),
-[вес 0.01](runs/controller-teacher-mac-r16-mu001/report.html).
+Артефакты: [вес 0](runs/report.html),
+[вес 0.01](runs/report.html).
 
 ## Масштабирование
 
@@ -366,7 +366,6 @@ python run_a100.py                   # итоговое сравнение, че
 python eval.py runs/huginn-clean-mac/best.pt
 python viz.py                        # самодостаточный HTML из JSON
 python make_figures.py               # рисунок из истории A100
-python a100_diagnostics.py           # диагностика A100-чекпойнтов и общий HTML
 ```
 
 Артефакты A100 забираются из ClearML вместе с готовой строкой таблицы:
@@ -375,6 +374,6 @@ python a100_diagnostics.py           # диагностика A100-чекпой�
 python fetch_a100.py <task_id> 24584192
 ```
 
-Диагностика собрана в двух самодостаточных страницах: [runs/report.html](runs/report.html)
-показывает финальное сравнение, [runs/all-experiments.html](runs/all-experiments.html) —
-все семнадцать прогонов плюс карточки старого screening.
+Вся диагностика собрана в одной самодостаточной странице
+[runs/report.html](runs/report.html): тринадцать прогонов с общим селектором, включая
+финальные A100.

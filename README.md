@@ -34,11 +34,12 @@ python data.py
 ## Обучение
 
 ```bash
-python run_a100.py
+python train.py
 ```
 
-Скрипт строит общий токен-кэш и обучает четыре варианта, по одному процессу на GPU.
-Конфигурации задаются Python-объектами внутри файла, CLI-флагов обучения нет.
+Обучает финальный вариант отчёта, Huginn с 16 повторами, на бюджете задания.
+Конфигурации задаются Python-объектами внутри файла, CLI-флагов обучения нет. Код
+оркестрации прогонов на кластере вынесен в отдельный репозиторий и здесь не лежит.
 Каждый прогон пишет `config.json`, `metrics.jsonl`, `history.json`, `best.pt`,
 `last.pt`, snapshots held-out тензоров и самодостаточный `report.html`.
 
@@ -61,4 +62,4 @@ python eval.py runs/huginn-clean-mac/best.pt
 | `make_figures.py` | рисунок отчёта из истории A100 |
 
 Интерактивная диагностика всех прогонов, включая финальные A100, —
-[runs/all-experiments.html](runs/all-experiments.html).
+[runs/report.html](runs/report.html).
