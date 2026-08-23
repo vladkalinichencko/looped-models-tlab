@@ -1,0 +1,34 @@
+device=mps  params: 15.59M total / 9.30M non-embedding
+step      0/976  tok    0.0M  loss 18.9892  8s
+step     50/976  tok    0.4M  loss 14.4526  189s
+step    100/976  tok    0.8M  loss 13.9898  371s
+  val loss 7.2724  ppl 1440.02
+step    150/976  tok    1.2M  loss 13.6104  561s
+step    200/976  tok    1.6M  loss 13.1365  743s
+  val loss 6.7563  ppl 859.46
+step    250/976  tok    2.0M  loss 12.6475  932s
+step    300/976  tok    2.5M  loss 12.7536  1114s
+  val loss 6.4975  ppl 663.46
+step    350/976  tok    2.9M  loss 12.1198  1304s
+step    400/976  tok    3.3M  loss 12.1792  1489s
+  val loss 6.2457  ppl 515.79
+step    450/976  tok    3.7M  loss 11.5534  1679s
+step    500/976  tok    4.1M  loss 11.5308  1860s
+  val loss 6.0903  ppl 441.55
+step    550/976  tok    4.5M  loss 12.0029  2050s
+step    600/976  tok    4.9M  loss 11.8197  2232s
+  val loss 5.9800  ppl 395.44
+step    650/976  tok    5.3M  loss 11.1354  2422s
+step    700/976  tok    5.7M  loss 11.1132  2603s
+  val loss 5.9152  ppl 370.62
+step    750/976  tok    6.1M  loss 10.4060  2793s
+step    800/976  tok    6.6M  loss 10.5198  2978s
+  val loss 5.7817  ppl 324.30
+step    850/976  tok    7.0M  loss 10.8015  3168s
+step    900/976  tok    7.4M  loss 11.3221  3350s
+  val loss 5.7124  ppl 302.60
+step    950/976  tok    7.8M  loss 10.6844  3540s
+  val loss 5.6943  ppl 297.16
+best val ppl 297.1553428833146 -> runs/idea_ouro
+/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/multiprocessing/resource_tracker.py:279: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

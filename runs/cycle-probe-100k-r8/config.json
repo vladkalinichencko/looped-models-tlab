@@ -1,0 +1,42 @@
+{
+  "model": {
+    "vocab_size": 16384,
+    "method": "baseline",
+    "d_model": 384,
+    "n_heads": 6,
+    "n_kv_heads": 3,
+    "head_dim": 128,
+    "d_ff": 1152,
+    "n_prelude": 0,
+    "n_core": 4,
+    "n_coda": 0,
+    "mean_recurrence": 8,
+    "backprop_last": 0,
+    "max_seq": 512,
+    "rope_theta": 1000000.0,
+    "norm_eps": 1e-06
+  },
+  "training": {
+    "tag": "cycle-probe-100k-r8",
+    "tokens": 98304,
+    "seed": 0,
+    "batch_size": 4,
+    "seq_len": 512,
+    "lr": 0.003,
+    "min_lr": 0.0003,
+    "warmup": 8,
+    "weight_decay": 0.1,
+    "grad_clip": 1.0,
+    "eval_every": 49,
+    "log_every": 4,
+    "device": "mps"
+  },
+  "runtime": {
+    "device": "mps",
+    "dtype": "float32",
+    "torch": "2.13.0",
+    "params_total": 15143296,
+    "params_non_embedding": 8851840,
+    "data_manifest": "datasets/fineweb_06c0e26f662f_512_8000000.json"
+  }
+}

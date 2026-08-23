@@ -1,3 +1,0 @@
-{"type": "train", "step": 0, "tokens": 0, "loss": 9.952108383178711, "lr": 0.003, "recurrence": 10, "grad_norm": 1.6916438341140747, "seconds": 0.7586653232574463}
-{"type": "train", "step": 1, "tokens": 1024, "loss": 9.120648384094238, "lr": 0.003, "recurrence": 4, "grad_norm": 4.2968974113464355, "seconds": 1.4057941436767578}
-{"type": "selection", "step": 1, "tokens": 2048, "loss": 8.853065967559814, "ppl": 6995.80503414029}

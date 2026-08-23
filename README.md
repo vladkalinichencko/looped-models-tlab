@@ -1,7 +1,10 @@
 # Looped transformer на FineWeb
 
-Тестовое задание T-LAB, Looped Models. Условие — [NOTES.md](NOTES.md),
-конвенции репозитория — [AGENTS.md](AGENTS.md).
+Тестовое задание T-LAB, Looped Models. Условие находится в [NOTES.md](NOTES.md).
+Правила репозитория находятся в [AGENTS.md](AGENTS.md).
+
+Итоговый аргумент собирается в [report.md](report.md). Интерактивная диагностика
+текущих baseline находится в [runs/report.html](runs/report.html).
 
 ## Setup
 

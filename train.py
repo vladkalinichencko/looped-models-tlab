@@ -2,12 +2,14 @@
 
 from contextlib import contextmanager, nullcontext
 from dataclasses import asdict, dataclass
+import itertools
 import json
 import math
 from pathlib import Path
 import time
 
 import torch
+import torch.nn.functional as F
 
 import data
 from model import LoopedLM
@@ -67,8 +69,12 @@ def fixed_rng(device: str, seed: int):
 @torch.no_grad()
 def evaluate(model: LoopedLM, blocks: torch.Tensor, cfg: Config) -> float:
     model.eval()
-    losses = [model(x, y, steps=model.cfg.mean_recurrence)[1].item()
-              for x, y in data.batches(blocks, cfg.batch_size, next(model.parameters()).device)]
+    batches = itertools.islice(
+        data.batches(blocks, cfg.batch_size, next(model.parameters()).device), 17)
+    losses = []
+    for x, y in batches:
+        logits = model(x, steps=model.cfg.mean_recurrence)[0]
+        losses.append(F.cross_entropy(logits.reshape(-1, logits.shape[-1]), y.reshape(-1)).item())
     model.train()
     return sum(losses) / len(losses)
 
@@ -92,6 +98,7 @@ def train(model: LoopedLM, prepared: dict[str, torch.Tensor], manifest: Path,
 
     out = Path("runs") / cfg.tag
     out.mkdir(parents=True, exist_ok=True)
+    (out / "snapshots").mkdir(exist_ok=True)
     runtime = {
         "device": device,
         "dtype": "bfloat16" if device == "cuda" else "float32",
@@ -138,6 +145,7 @@ def train(model: LoopedLM, prepared: dict[str, torch.Tensor], manifest: Path,
                 row = {"type": "train", "step": step, "tokens": step * cfg.batch_size * cfg.seq_len,
                        "loss": loss.item(), "lr": lr, "recurrence": recurrence,
                        "grad_norm": grad_norm, "seconds": time.time() - started}
+                row.update(getattr(model, "last_objective", {}))
                 log.write(json.dumps(row) + "\n")
                 log.flush()
                 print(f"{cfg.tag} {step:4}/{total_steps} loss={loss.item():.4f} r={recurrence}")
@@ -156,6 +164,7 @@ def train(model: LoopedLM, prepared: dict[str, torch.Tensor], manifest: Path,
                               "training_config": asdict(cfg), "runtime": runtime,
                               "step": step, "selection_loss": selection_loss,
                               "tokenizer": str(data.TOKENIZER_DIR)}
+                torch.save(checkpoint, out / "snapshots" / f"model_step{step:06d}.pt")
                 torch.save(checkpoint, out / "last.pt")
                 if selection_loss < best:
                     best = selection_loss

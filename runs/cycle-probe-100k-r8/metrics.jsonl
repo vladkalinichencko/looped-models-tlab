@@ -1,0 +1,13 @@
+{"type": "train", "step": 0, "tokens": 0, "loss": 9.783699035644531, "lr": 0.000375, "recurrence": 8, "grad_norm": 4.50400972366333, "seconds": 2.1496503353118896}
+{"type": "train", "step": 4, "tokens": 8192, "loss": 8.700966835021973, "lr": 0.001875, "recurrence": 8, "grad_norm": 1.6204177141189575, "seconds": 10.486875295639038}
+{"type": "train", "step": 8, "tokens": 16384, "loss": 7.407876968383789, "lr": 0.003, "recurrence": 8, "grad_norm": 0.8725353479385376, "seconds": 18.39047932624817}
+{"type": "train", "step": 12, "tokens": 24576, "loss": 12.286737442016602, "lr": 0.0029339262969984574, "recurrence": 8, "grad_norm": 2.201115369796753, "seconds": 23.47757315635681}
+{"type": "train", "step": 16, "tokens": 32768, "loss": 7.968588829040527, "lr": 0.0027421729424061793, "recurrence": 8, "grad_norm": 1.564218282699585, "seconds": 28.537893295288086}
+{"type": "train", "step": 20, "tokens": 40960, "loss": 7.313926696777344, "lr": 0.002443510090594839, "recurrence": 8, "grad_norm": 1.2666802406311035, "seconds": 33.666823387145996}
+{"type": "train", "step": 24, "tokens": 49152, "loss": 7.918339252471924, "lr": 0.002067172942406179, "recurrence": 8, "grad_norm": 1.3040684461593628, "seconds": 38.80382704734802}
+{"type": "train", "step": 28, "tokens": 57344, "loss": 7.77401065826416, "lr": 0.00165, "recurrence": 8, "grad_norm": 1.0935800075531006, "seconds": 43.86526322364807}
+{"type": "train", "step": 32, "tokens": 65536, "loss": 7.963629722595215, "lr": 0.0012328270575938211, "recurrence": 8, "grad_norm": 0.7203620076179504, "seconds": 48.87098503112793}
+{"type": "train", "step": 36, "tokens": 73728, "loss": 7.558718681335449, "lr": 0.0008564899094051614, "recurrence": 8, "grad_norm": 1.0100879669189453, "seconds": 53.9114990234375}
+{"type": "train", "step": 40, "tokens": 81920, "loss": 7.940708637237549, "lr": 0.0005578270575938211, "recurrence": 8, "grad_norm": 0.8512912392616272, "seconds": 58.9797739982605}
+{"type": "train", "step": 44, "tokens": 90112, "loss": 7.401207447052002, "lr": 0.0003660737030015427, "recurrence": 8, "grad_norm": 0.7619341015815735, "seconds": 64.03532218933105}
+{"type": "selection", "step": 47, "tokens": 98304, "loss": 7.94453763961792, "ppl": 2820.128244349823}

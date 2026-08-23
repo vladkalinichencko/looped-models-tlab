@@ -35,3 +35,45 @@ mlruns/
 mlartifacts/
 
 # logs/, runs/ и tmp/ содержат доказательства и отслеживаются
+
+# служебные инструкции агентов
+AGENTS.md
+CLAUDE.md
+
+# сырые дампы диагностики: агрегаты уже вшиты в self-contained HTML
+runs/**/diag.jsonl
+runs/**/diag-best.json
+runs/**/snapshots/
+
+# smoke-прогоны: проверяли только проводку кода, выводы перенесены в отчёт
+runs/baseline-smoke-mac/
+runs/huginn-smoke-mac/
+runs/cycle-probe-smoke-r*/
+runs/cycle-probe-smoke.html
+runs/smoke-report.html
+
+# старый screening на прежнем токенизаторе, сведён в runs/all-experiments.html
+runs/idea_*/
+runs/loop4*/
+runs/loop8*/
+runs/loops*/
+runs/dense1/
+runs/smoke/
+runs/smoke16k/
+runs/qwen3_smoke/
+
+# варианты контроллера, не вошедшие в отчёт
+runs/controller-separate-mac-r16-*/
+runs/controller-softmax-mac-r16-*/
+
+# токенизатор предыдущего поколения, рабочий — fineweb16k-clean
+tokenizers/fineweb16k/
+
+# скачанные A100-чекпойнты: лучший уезжает на HuggingFace, не в git
+runs/a100/*-best
+
+# автоматизация и wiring-проверки: проверяющим не нужны
+fetch_a100.py
+run_smoke.py
+run_cycle_probe.py
+tmp/

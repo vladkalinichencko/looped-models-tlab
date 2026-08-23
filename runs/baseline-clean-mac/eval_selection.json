@@ -1,0 +1,31 @@
+{
+  "checkpoint": "runs/baseline-clean-mac/best.pt",
+  "split": "selection",
+  "rows": [
+    {
+      "recurrence": 1,
+      "loss": 5.621429499457864,
+      "ppl": 276.28404897857314
+    },
+    {
+      "recurrence": 2,
+      "loss": 5.8092880529515885,
+      "ppl": 333.3816910532181
+    },
+    {
+      "recurrence": 4,
+      "loss": 6.49253828385297,
+      "ppl": 660.1970056260366
+    },
+    {
+      "recurrence": 8,
+      "loss": 7.357551574707031,
+      "ppl": 1567.99274612997
+    },
+    {
+      "recurrence": 16,
+      "loss": 7.992649947895723,
+      "ppl": 2959.1281141445866
+    }
+  ]
+}

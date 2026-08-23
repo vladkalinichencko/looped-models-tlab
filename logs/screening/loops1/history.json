@@ -1,0 +1,121 @@
+{
+  "config": {
+    "tag": "loops1",
+    "tokenizer": "tokenizers/fineweb16k",
+    "tokens": 25000000,
+    "n_loops": 1,
+    "n_layers": 4,
+    "d_model": 384,
+    "n_heads": 6,
+    "n_kv_heads": 3,
+    "head_dim": 128,
+    "d_ff": 1152,
+    "loop_scheme": "stack",
+    "group_size": 2,
+    "input_injection": false,
+    "loop_norm": false,
+    "step_cond": false,
+    "grad_checkpoint": true,
+    "seq_len": 512,
+    "batch_size": 16,
+    "lr": 0.003,
+    "min_lr": 0.0003,
+    "warmup": 200,
+    "weight_decay": 0.1,
+    "grad_clip": 1.0,
+    "val_batches": 20,
+    "eval_every": 250,
+    "save_every": 0,
+    "log_every": 50,
+    "diag_every": 250,
+    "spectral_every": 4,
+    "seed": 0,
+    "device": "auto"
+  },
+  "params": {
+    "total": 15143296,
+    "non_embedding": 8851840
+  },
+  "best_val_loss": 5.066530108451843,
+  "best_val_ppl": 158.6229668239731,
+  "history": [
+    {
+      "step": 250,
+      "tokens": 2048000,
+      "val_loss": 6.519920444488525,
+      "val_ppl": 678.5244028362524
+    },
+    {
+      "step": 500,
+      "tokens": 4096000,
+      "val_loss": 6.063041830062867,
+      "val_ppl": 429.6804659734586
+    },
+    {
+      "step": 750,
+      "tokens": 6144000,
+      "val_loss": 5.840642380714416,
+      "val_ppl": 344.00024882940016
+    },
+    {
+      "step": 1000,
+      "tokens": 8192000,
+      "val_loss": 5.7021846055984495,
+      "val_ppl": 299.5210220566021
+    },
+    {
+      "step": 1250,
+      "tokens": 10240000,
+      "val_loss": 5.5531455993652346,
+      "val_ppl": 258.0479961903071
+    },
+    {
+      "step": 1500,
+      "tokens": 12288000,
+      "val_loss": 5.45293161869049,
+      "val_ppl": 233.44152528233752
+    },
+    {
+      "step": 1750,
+      "tokens": 14336000,
+      "val_loss": 5.341573286056518,
+      "val_ppl": 208.84101862254275
+    },
+    {
+      "step": 2000,
+      "tokens": 16384000,
+      "val_loss": 5.259185814857483,
+      "val_ppl": 192.32483950725563
+    },
+    {
+      "step": 2250,
+      "tokens": 18432000,
+      "val_loss": 5.2040540933609005,
+      "val_ppl": 182.00862814821974
+    },
+    {
+      "step": 2500,
+      "tokens": 20480000,
+      "val_loss": 5.146295642852783,
+      "val_ppl": 171.7939241088342
+    },
+    {
+      "step": 2750,
+      "tokens": 22528000,
+      "val_loss": 5.102000188827515,
+      "val_ppl": 164.35031041097915
+    },
+    {
+      "step": 3000,
+      "tokens": 24576000,
+      "val_loss": 5.082046842575073,
+      "val_ppl": 161.10347212779064
+    },
+    {
+      "step": 3050,
+      "tokens": 24985600,
+      "val_loss": 5.066530108451843,
+      "val_ppl": 158.6229668239731
+    }
+  ]
+}

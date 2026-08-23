@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 
 import torch
+import torch.nn.functional as F
 
 import data
 import diag
@@ -14,20 +15,24 @@ from train import Config, fixed_rng, pick_device
 
 @torch.no_grad()
 def evaluate_checkpoint(checkpoint: Path, prepared, split: str = "selection",
-                        recurrences=(1, 2, 4, 8, 16)):
+                        recurrences=(0, 1, 2, 4, 8, 16)):
     model, blob = diag.load(checkpoint, pick_device())
     cfg = Config(**blob["training_config"])
+    out = checkpoint.parent / f"eval_{split}.json"
     rows = []
     for steps in recurrences:
         with fixed_rng(str(next(model.parameters()).device), cfg.seed + 10_000):
-            losses = [model(x, y, steps=steps)[1].item()
-                      for x, y in data.batches(prepared[split], cfg.batch_size,
-                                               next(model.parameters()).device)]
+            losses = []
+            for x, y in data.batches(prepared[split], cfg.batch_size,
+                                     next(model.parameters()).device):
+                logits = model(x, steps=steps)[0]
+                losses.append(F.cross_entropy(
+                    logits.reshape(-1, logits.shape[-1]), y.reshape(-1)).item())
         loss = sum(losses) / len(losses)
         rows.append({"recurrence": steps, "loss": loss, "ppl": math.exp(loss)})
-    out = checkpoint.parent / f"eval_{split}.json"
-    out.write_text(json.dumps({"checkpoint": str(checkpoint), "split": split,
-                               "rows": rows}, indent=2) + "\n")
+        out.write_text(json.dumps({"checkpoint": str(checkpoint), "split": split,
+                                   "rows": rows}, indent=2) + "\n")
+        print(rows[-1], flush=True)
     return rows
 
 
@@ -37,5 +42,4 @@ if __name__ == "__main__":
     train_cfg = Config(**blob["training_config"])
     prepared, _ = data.prepare(data.tokenizer(), data.Config(
         seq_len=train_cfg.seq_len, batch_size=train_cfg.batch_size, train_tokens=train_cfg.tokens))
-    for row in evaluate_checkpoint(checkpoint, prepared):
-        print(row)
+    evaluate_checkpoint(checkpoint, prepared)
