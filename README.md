@@ -1,31 +1,64 @@
 # Looped transformer на FineWeb
 
-Тестовое задание T-LAB, Looped Models. Условие находится в [NOTES.md](NOTES.md).
-Правила репозитория находятся в [AGENTS.md](AGENTS.md).
+Тестовое задание T-LAB, направление Looped Models. Условие — в [NOTES.md](NOTES.md),
+итоговый отчёт со всеми экспериментами и отрицательными результатами — в
+[report.md](report.md).
 
-Итоговый аргумент собирается в [report.md](report.md). Интерактивная диагностика
-текущих baseline находится в [runs/report.html](runs/report.html).
+## Лучший чекпойнт
 
-## Setup
+**https://huggingface.co/vladotpad/looped-qwen3-huginn-fineweb**
+
+Huginn с 16 повторами, 9 147 136 non-embedding параметров, selection perplexity 115.65
+на token-matched срезе в 24 584 192 токена. Обычный Qwen3 в один проход на том же срезе
+даёт 128.48. Токенизатор лежит там же, в `tokenizer/`.
+
+## Результаты
+
+| модель | повторов | применений блока | selection ppl |
+|---|---:|---:|---:|
+| Qwen3, один проход | 1 | 4 | 128.48 |
+| Huginn | 16 | 32 | 115.65 |
+| Антисимметричный переход | 16 | 64 | 370.70 |
+
+Один сид, bf16, A100. Подробности и разбор того, почему антисимметричный вариант
+проиграл, — в [report.md](report.md).
+
+## Установка
 
 ```bash
 ./setup.sh
 source .venv/bin/activate
+python data.py
 ```
 
-## Clean Mac preliminary runs
+## Обучение
 
 ```bash
-python -m tmp.test_clean_path
-python run_preliminary.py
+python run_preliminary.py   # Mac, baseline и Huginn, ~8M токенов
+python run_a100.py          # финальное сравнение четырёх вариантов
 ```
 
-Фиксированные Python-конфигурации находятся в `run_preliminary.py`. Каждый прогон
-пишет `config.json`, `metrics.jsonl`, `history.json`, `best.pt`, `last.pt`, snapshots
-реальных held-out тензоров и самодостаточный `report.html`.
+Конфигурации задаются Python-объектами внутри этих файлов, CLI-флагов обучения нет.
+Каждый прогон пишет `config.json`, `metrics.jsonl`, `history.json`, `best.pt`,
+`last.pt`, snapshots held-out тензоров и самодостаточный `report.html`.
 
-## Eval
+## Оценка чекпойнта
 
 ```bash
 python eval.py runs/huginn-clean-mac/best.pt
 ```
+
+## Раскладка кода
+
+| путь | что там |
+|---|---|
+| `model.py` | Qwen3-блоки и `LoopedLM` с явными `encode` / `states` / `decode` |
+| `methods/` | по файлу на схему лупинга: `plain`, `huginn`, `antisymmetric`, `controller` |
+| `data.py` | закреплённый split FineWeb, чистый BPE, общие token blocks |
+| `train.py` | один train- и selection-eval path на все варианты |
+| `eval.py` | оценка чекпойнта на фиксированных глубинах |
+| `diag.py`, `viz.py` | состояния, логиты, градиенты и самодостаточный HTML из них |
+| `make_figures.py` | рисунок отчёта из истории A100 |
+
+Интерактивная диагностика всех прогонов —
+[runs/all-experiments.html](runs/all-experiments.html).
