@@ -77,3 +77,5 @@ fetch_a100.py
 run_smoke.py
 run_cycle_probe.py
 tmp/
+run_preliminary.py
+setup.sh

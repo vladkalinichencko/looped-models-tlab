@@ -9,7 +9,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 RUNS = Path("runs/a100")
-CUT = 24_584_192
+CUT = 49_995_776
 SERIES = [
     ("baseline-a100", "Qwen3, один проход (r=1)", "#1d4ed8"),
     ("huginn-a100", "Huginn (r=16)", "#0f766e"),
@@ -30,7 +30,7 @@ def main():
         axes[0].plot([t / 1e6 for t in tokens], ppl, color=color, label=label, linewidth=2)
     axes[0].axvline(CUT / 1e6, color="#64748b", linestyle="--", linewidth=1)
     axes[0].text(CUT / 1e6, min(min(load(t)[1]) for t, _, _ in SERIES) * 1.15,
-                 " срез 24.6M", color="#64748b", fontsize=9)
+                 " полный бюджет 50M", color="#64748b", fontsize=9)
     axes[0].set_yscale("log")
     axes[0].set_xlabel("обработано train-токенов, млн")
     axes[0].set_ylabel("selection perplexity (log)")
@@ -50,7 +50,7 @@ def main():
         axes[1].text(bar.get_x() + bar.get_width() / 2, value, f"{value:.1f}",
                      ha="center", va="bottom", fontsize=10)
     axes[1].set_ylabel("selection perplexity")
-    axes[1].set_title(f"Token-matched срез, {CUT:,} токенов".replace(",", " "))
+    axes[1].set_title(f"Полный бюджет, {CUT:,} токенов".replace(",", " "))
     axes[1].tick_params(axis="x", labelrotation=12)
     axes[1].grid(alpha=0.25, axis="y")
 

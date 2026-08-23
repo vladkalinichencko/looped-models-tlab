@@ -26,19 +26,19 @@ Huginn с 16 повторами, 9 147 136 non-embedding параметров, s
 ## Установка
 
 ```bash
-./setup.sh
-source .venv/bin/activate
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
 python data.py
 ```
 
 ## Обучение
 
 ```bash
-python run_preliminary.py   # Mac, baseline и Huginn, ~8M токенов
-python run_a100.py          # финальное сравнение четырёх вариантов
+python run_a100.py
 ```
 
-Конфигурации задаются Python-объектами внутри этих файлов, CLI-флагов обучения нет.
+Скрипт строит общий токен-кэш и обучает четыре варианта, по одному процессу на GPU.
+Конфигурации задаются Python-объектами внутри файла, CLI-флагов обучения нет.
 Каждый прогон пишет `config.json`, `metrics.jsonl`, `history.json`, `best.pt`,
 `last.pt`, snapshots held-out тензоров и самодостаточный `report.html`.
 
@@ -60,5 +60,6 @@ python eval.py runs/huginn-clean-mac/best.pt
 | `diag.py`, `viz.py` | состояния, логиты, градиенты и самодостаточный HTML из них |
 | `make_figures.py` | рисунок отчёта из истории A100 |
 
-Интерактивная диагностика всех прогонов —
+Финальные A100-прогоны — [runs/a100-comparison.html](runs/a100-comparison.html).
+Интерактивная диагностика всех Mac-прогонов —
 [runs/all-experiments.html](runs/all-experiments.html).
