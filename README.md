@@ -60,6 +60,5 @@ python eval.py runs/huginn-clean-mac/best.pt
 | `diag.py`, `viz.py` | состояния, логиты, градиенты и самодостаточный HTML из них |
 | `make_figures.py` | рисунок отчёта из истории A100 |
 
-Финальные A100-прогоны — [runs/a100-comparison.html](runs/a100-comparison.html).
-Интерактивная диагностика всех Mac-прогонов —
+Интерактивная диагностика всех прогонов, включая финальные A100, —
 [runs/all-experiments.html](runs/all-experiments.html).

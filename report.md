@@ -366,7 +366,7 @@ python run_a100.py                   # итоговое сравнение, че
 python eval.py runs/huginn-clean-mac/best.pt
 python viz.py                        # самодостаточный HTML из JSON
 python make_figures.py               # рисунок из истории A100
-python a100_report.py                # HTML по финальным A100-прогонам
+python a100_diagnostics.py           # диагностика A100-чекпойнтов и общий HTML
 ```
 
 Артефакты A100 забираются из ClearML вместе с готовой строкой таблицы:
@@ -375,5 +375,6 @@ python a100_report.py                # HTML по финальным A100-про�
 python fetch_a100.py <task_id> 24584192
 ```
 
-Диагностика Mac-прогонов собрана в [runs/all-experiments.html](runs/all-experiments.html),
-финальные A100-прогоны — в [runs/a100-comparison.html](runs/a100-comparison.html).
+Диагностика собрана в двух самодостаточных страницах: [runs/report.html](runs/report.html)
+показывает финальное сравнение, [runs/all-experiments.html](runs/all-experiments.html) —
+все семнадцать прогонов плюс карточки старого screening.
