@@ -7,6 +7,8 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+import methods
+
 
 @dataclass(frozen=True)
 class Config:
@@ -168,39 +170,7 @@ class LoopedLM(nn.Module):
     def recurrent_step(self, state: torch.Tensor, embedded: torch.Tensor,
                        cos: torch.Tensor, sin: torch.Tensor, trace: list | None = None,
                        routing: torch.Tensor | None = None) -> torch.Tensor:
-        if self.skew is not None:
-            core_out = state
-            for index, block in enumerate(self.core):
-                core_out = block(core_out, cos, sin)
-                if trace is not None:
-                    trace.append((f"core block {index}", core_out))
-            rotation = F.linear(core_out, self.skew - self.skew.T)
-            gate = torch.sigmoid(self.skew_gate(torch.cat([state, embedded], -1)))
-            state = (1 - torch.sigmoid(self.skew_decay_logit)) * state + gate * rotation
-            if trace is not None:
-                trace.append(("antisymmetric update", state))
-            return state
-        if self.controller_head is not None:
-            if routing is None:
-                raise ValueError("controller step needs routing weights")
-            proposals = torch.stack([block(state, cos, sin) for block in self.core], 2)
-            state = (routing[..., None] * proposals).sum(2)
-            if trace is not None:
-                trace.append(("softmax routed blocks", state))
-            return state
-        if self.adapter is not None:
-            state = self.adapter(torch.cat([state, embedded], -1))
-            if trace is not None:
-                trace.append(("input adapter", state))
-        for index, block in enumerate(self.core):
-            state = block(state, cos, sin)
-            if trace is not None:
-                trace.append((f"core block {index}", state))
-        if self.core_norm is not None:
-            state = self.core_norm(state)
-            if trace is not None:
-                trace.append(("core RMSNorm", state))
-        return state
+        return methods.STEPS[self.cfg.method](self, state, embedded, cos, sin, trace, routing)
 
     def controller_routing(self, embedded: torch.Tensor, steps: int):
         hidden = torch.tanh(self.controller_init(embedded.detach())).flatten(0, 1)
