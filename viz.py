@@ -81,7 +81,7 @@ function controller(s){const rows=s.controller||[];if(!rows.length)return empty(
  panel('Branch task loss',chart(series('branch_loss'),{xLabel:'цикл',yLabel:'token CE'}),'Каждый блок получает собственный task objective.'),
  panel('Cosine выходов блоков',chart([{name:'0·1',color:C.blue,points:rows.map(r=>({x:r.step,y:r.pairwise_cosine[0][1]}))},{name:'0·2',color:C.orange,points:rows.map(r=>({x:r.step,y:r.pairwise_cosine[0][2]}))},{name:'0·3',color:C.green,points:rows.map(r=>({x:r.step,y:r.pairwise_cosine[0][3]}))}],{xLabel:'цикл',yLabel:'cosine'}),'Падение cosine означает, что contrastive term разводит proposals.')]);}
 
-const runs=Object.values(D.runs),run=document.querySelector('#run'),checkpoint=document.querySelector('#checkpoint'),loop=document.querySelector('#loop'),loopOut=document.querySelector('#loop-value'),readout=document.querySelector('#readout'),app=document.querySelector('#app');runs.forEach((r,i)=>run.append(el('option',{value:i},[r.tag])));
+const runs=Object.values(D.runs),run=document.querySelector('#run'),checkpoint=document.querySelector('#checkpoint'),loop=document.querySelector('#loop'),loopOut=document.querySelector('#loop-value'),readout=document.querySelector('#readout'),app=document.querySelector('#app');runs.forEach((r,i)=>run.append(el('option',{value:i},[r.label||r.tag])));
 function refill(){const r=runs[+run.value];checkpoint.replaceChildren(...r.diag.map((s,i)=>el('option',{value:i},[`step ${s.step}`])));checkpoint.value=r.diag.length-1;configure()}
 function configure(){const s=runs[+run.value].diag[+checkpoint.value];loop.max=s.rows.length;loop.value=Math.min(2,s.rows.length);draw()}
 function draw(){const r=runs[+run.value],s=r.diag[+checkpoint.value],step=+loop.value,last=s.rows[Math.max(0,step-1)];loopOut.value=step;readout.value=`mean loss ${fmt(last?.token_loss)} · KL ${fmt(last?.token_kl)} · effective rank ${fmt(s.projection?.effective_rank)}`;app.replaceChildren();
@@ -103,6 +103,26 @@ run.onchange=refill;checkpoint.onchange=configure;loop.oninput=draw;refill();
 """
 
 
+
+LABELS = {
+    "baseline-a100": "Qwen3, один проход",
+    "huginn-a100": "Huginn, 16 циклов",
+    "antisymmetric-a100": "Антисимметричный переход, 16 циклов",
+    "controller-a100-50M": "Контроллер над слоями, 16 циклов",
+    "plain-loop-r16": "Голый луп, 16 циклов",
+    "skew-no-norm-r16": "Кососимметричные блоки без нормализации",
+    "skew-loop-norm-r16": "Кососимметричные блоки, одна нормализация на цикл",
+    "cycle-probe-100k-r2": "Проверка глубины: 2 цикла",
+    "cycle-probe-100k-r4": "Проверка глубины: 4 цикла",
+    "cycle-probe-100k-r8": "Проверка глубины: 8 циклов",
+    "cycle-probe-100k-r16": "Проверка глубины: 16 циклов",
+}
+
+
+def label_for(tag: str) -> str:
+    return LABELS.get(tag, tag)
+
+
 def collect(root: Path, out: Path, tags=None):
     runs = {}
     for config_path in sorted(root.glob("*/config.json")):
@@ -117,6 +137,7 @@ def collect(root: Path, out: Path, tags=None):
         depth_path = run / "eval_selection.json"
         runs[run.name] = {
             "tag": run.name,
+            "label": label_for(run.name),
             "config": json.loads(config_path.read_text()),
             "metrics": [json.loads(line) for line in (run / "metrics.jsonl").read_text().splitlines()],
             "diag": snapshots,
