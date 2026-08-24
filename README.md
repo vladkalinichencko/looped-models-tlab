@@ -62,4 +62,4 @@ python eval.py runs/huginn-clean-mac/best.pt
 | `make_figures.py` | рисунок отчёта из истории A100 |
 
 Интерактивная диагностика всех прогонов, включая финальные A100, —
-[runs/report.html](runs/report.html).
+[report.html](report.html).
