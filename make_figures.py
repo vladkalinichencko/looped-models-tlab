@@ -14,11 +14,15 @@ SERIES = [
     ("baseline-a100", "Qwen3, один проход (r=1)", "#1d4ed8"),
     ("huginn-a100", "Huginn (r=16)", "#0f766e"),
     ("antisymmetric-a100", "Антисимметричный (r=16)", "#c2410c"),
+    ("controller-a100-50M", "Контроллер (r=16)", "#7c3aed"),
 ]
 
 
 def load(tag):
-    rows = json.loads((RUNS / f"{tag}-history").read_text())
+    source = RUNS / f"{tag}-history"
+    if not source.exists():
+        source = Path("runs") / tag / "history.json"
+    rows = json.loads(source.read_text())
     return [r["tokens"] for r in rows], [math.exp(r["loss"]) for r in rows]
 
 
@@ -46,10 +50,12 @@ def main():
         values.append(cut[1])
         colors.append(color)
     bars = axes[1].bar(names, values, color=colors, width=0.55)
+    axes[1].set_yscale("log")  # контроллер на три порядка выше остальных
     for bar, value in zip(bars, values):
-        axes[1].text(bar.get_x() + bar.get_width() / 2, value, f"{value:.1f}",
+        axes[1].text(bar.get_x() + bar.get_width() / 2, value, f"{value:,.0f}".replace(",", " ")
+                     if value > 1000 else f"{value:.1f}",
                      ha="center", va="bottom", fontsize=10)
-    axes[1].set_ylabel("selection perplexity")
+    axes[1].set_ylabel("selection perplexity (log)")
     axes[1].set_title(f"Полный бюджет, {CUT:,} токенов".replace(",", " "))
     axes[1].tick_params(axis="x", labelrotation=12)
     axes[1].grid(alpha=0.25, axis="y")
