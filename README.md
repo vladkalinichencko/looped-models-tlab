@@ -1,6 +1,6 @@
 # Looped transformer на FineWeb
 
-Тестовое задание T-LAB, направление Looped Models. Условие — в [NOTES.md](NOTES.md),
+Тестовое задание T-LAB, направление Looped Models. 
 итоговый отчёт со всеми экспериментами и отрицательными результатами — в
 [report.md](report.md).
 
@@ -59,7 +59,6 @@ python eval.py runs/huginn-clean-mac/best.pt
 | `train.py` | один train- и selection-eval path на все варианты |
 | `eval.py` | оценка чекпойнта на фиксированных глубинах |
 | `diag.py`, `viz.py` | состояния, логиты, градиенты и самодостаточный HTML из них |
-| `make_figures.py` | рисунок отчёта из истории A100 |
 
 Интерактивная диагностика всех прогонов, включая финальные A100, —
 [report.html](report.html).

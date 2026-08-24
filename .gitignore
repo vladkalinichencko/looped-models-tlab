@@ -77,3 +77,7 @@ run_cycle_probe.py
 tmp/
 run_preliminary.py
 setup.sh
+
+# журнал работы и вспомогательные скрипты: проверяющему не нужны
+NOTES.md
+tmp/
