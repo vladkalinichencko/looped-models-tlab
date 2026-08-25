@@ -7,29 +7,27 @@ import torch
 import torch.nn.functional as F
 from torch.nn.attention import SDPBackend, sdpa_kernel
 
-from model import Config, LoopedLM
+from torch import nn
 
+from model import Config, LoopedLM
 
 def token_kl(logp: torch.Tensor, next_logp: torch.Tensor) -> torch.Tensor:
     return (logp.exp() * (logp - next_logp)).sum(-1).clamp_min(0)
-
 
 def token_js(logp: torch.Tensor, next_logp: torch.Tensor) -> torch.Tensor:
     middle = torch.logaddexp(logp, next_logp) - torch.log(torch.tensor(2.0, device=logp.device))
     return 0.5 * (token_kl(logp, middle) + token_kl(next_logp, middle))
 
-
 def _continue(model, state, embedded, cos, sin, steps, start_step=0):
     routing = (model.controller_routing(embedded, start_step + steps)
-               if model.controller_head is not None else None)
+               if getattr(model, "controller_head", None) is not None else None)
     for step in range(start_step, start_step + steps):
         weights = None if routing is None else routing[step][1]
         state = model.recurrent_step(state, embedded, cos, sin, routing=weights)
     return state
 
-
 @torch.no_grad()
-def ablations(model: LoopedLM, x: torch.Tensor, states: list[torch.Tensor],
+def ablations(model: nn.Module, x: torch.Tensor, states: list[torch.Tensor],
               targets: torch.Tensor):
     if len(states) < 3:
         return []
@@ -52,8 +50,7 @@ def ablations(model: LoopedLM, x: torch.Tensor, states: list[torch.Tensor],
                          "kl_to_original": max(0.0, token_kl(logp, final_logp).mean().item())})
     return rows
 
-
-def write_snapshot(model: LoopedLM, block: torch.Tensor, tok, out: Path,
+def write_snapshot(model: nn.Module, block: torch.Tensor, tok, out: Path,
                    train_step: int, device: str, projection: Path | None = None,
                    snapshot_name: str | None = None):
     was_training = model.training
@@ -77,7 +74,7 @@ def write_snapshot(model: LoopedLM, block: torch.Tensor, tok, out: Path,
                               reduction="none").view_as(targets).detach() for value in logits]
     deltas = [detached[i + 1] - detached[i] for i in range(len(detached) - 1)]
     adapter_components = None
-    if model.adapter is not None:
+    if getattr(model, "adapter", None) is not None:
         embedded = model.encode(inputs)[0].detach()
         state_weight, input_weight = model.adapter.weight.detach().split(model.cfg.d_model, 1)
         adapter_components = [(F.linear(state, state_weight), F.linear(embedded, input_weight))
@@ -251,7 +248,7 @@ def write_snapshot(model: LoopedLM, block: torch.Tensor, tok, out: Path,
         active_rows.append({"step": step + 1, "loss_improvement": improvement.tolist(),
                             "correlations": correlations})
     summary["active_learning"] = active_rows
-    if model.controller_head is not None:
+    if getattr(model, "controller_head", None) is not None:
         embedded, cos, sin = model.encode(inputs)
         routing = model.controller_routing(embedded, steps)
         controller_rows = []
@@ -296,7 +293,6 @@ def write_snapshot(model: LoopedLM, block: torch.Tensor, tok, out: Path,
     model.train(was_training)
     return summary
 
-
 def fit_projection(snapshot: Path, out: Path = Path("runs/projection.pt")):
     raw = torch.load(snapshot, map_location="cpu", weights_only=False)
     values = torch.cat([state.float().flatten(0, 1) for state in raw["states"]])
@@ -314,18 +310,15 @@ def fit_projection(snapshot: Path, out: Path = Path("runs/projection.pt")):
                 "source": str(snapshot)}, out)
     return out
 
-
 def _jvp(function, point, direction):
     with sdpa_kernel(SDPBackend.MATH):
         return torch.func.jvp(function, (point,), (direction,))[1]
-
 
 def _quantize(matrix: torch.Tensor):
     scale = matrix.abs().max().clamp_min(1e-12)
     return (matrix / scale * 127).round().to(torch.int8), float(scale)
 
-
-def _jacobian(model: LoopedLM, inputs: torch.Tensor, steps: int,
+def _jacobian(model: nn.Module, inputs: torch.Tensor, steps: int,
               initial_state: torch.Tensor):
     inputs = inputs[:, :16]
     embedded, cos, sin = model.encode(inputs)
@@ -333,7 +326,7 @@ def _jacobian(model: LoopedLM, inputs: torch.Tensor, steps: int,
     state = states[-2].detach()
 
     routing = (model.controller_routing(embedded, steps)[-1][1]
-               if model.controller_head is not None else None)
+               if getattr(model, "controller_head", None) is not None else None)
 
     def update(value):
         return model.recurrent_step(value, embedded, cos, sin, routing=routing)
@@ -384,8 +377,7 @@ def _jacobian(model: LoopedLM, inputs: torch.Tensor, steps: int,
         "right_direction_q": direction_q.tolist(), "right_direction_scale": direction_scale,
     }, {"local_jacobian": block_cpu, "right_singular_direction": direction.detach().cpu()}, direction
 
-
-def _fisher(model: LoopedLM, state: torch.Tensor, position: int, samples: int = 4):
+def _fisher(model: nn.Module, state: torch.Tensor, position: int, samples: int = 4):
     point = state.detach().requires_grad_(True)
     logp = model.decode(point)[0, position].log_softmax(-1)
     generator = torch.Generator().manual_seed(0)
@@ -397,8 +389,7 @@ def _fisher(model: LoopedLM, state: torch.Tensor, position: int, samples: int = 
         values.append(gradient.square().sum())
     return float(torch.stack(values).mean().detach())
 
-
-def _step_sensitivity(model: LoopedLM, state: torch.Tensor, delta: torch.Tensor):
+def _step_sensitivity(model: nn.Module, state: torch.Tensor, delta: torch.Tensor):
     logits, effect = torch.func.jvp(model.decode, (state,), (delta,))
     probability = logits.detach().softmax(-1)
     effect = effect.detach()
@@ -406,8 +397,7 @@ def _step_sensitivity(model: LoopedLM, state: torch.Tensor, delta: torch.Tensor)
     fisher_length = ((probability * effect.square()).sum(-1) - mean.square()).clamp_min(0)
     return effect.float().pow(2).mean(-1).sqrt(), fisher_length
 
-
-def analyze(model: LoopedLM, inputs: torch.Tensor, targets: torch.Tensor,
+def analyze(model: nn.Module, inputs: torch.Tensor, targets: torch.Tensor,
             states: list[torch.Tensor],
             projection_path: Path):
     projection = torch.load(projection_path, map_location="cpu", weights_only=False)
@@ -494,7 +484,6 @@ def analyze(model: LoopedLM, inputs: torch.Tensor, targets: torch.Tensor,
         "exploration": exploration,
     }, extra
 
-
 def rebuild(run: Path, block: torch.Tensor, tok, device: str,
             projection: Path = Path("runs/projection.pt")):
     summaries = []
@@ -504,7 +493,6 @@ def rebuild(run: Path, block: torch.Tensor, tok, device: str,
         summaries.append(write_snapshot(model, block, tok, run, blob["step"], device, projection))
     (run / "diag.jsonl").write_text("".join(json.dumps(row) + "\n" for row in summaries))
     return summaries
-
 
 def load(checkpoint: str | Path, device: str = "cpu"):
     blob = torch.load(checkpoint, map_location=device, weights_only=False)

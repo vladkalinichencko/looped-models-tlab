@@ -1,6 +1,6 @@
 # Looped Models
 
-Зацикленный трансформер на FineWeb: один блок Qwen3 применяется много раз подряд.
+Один recurrent core Qwen3, четыре отдельные модели, как его крутить.
 
 Отчёт — [report.md](report.md). Диагностика всех прогонов — [report.html](report.html).
 Лучший чекпойнт — https://huggingface.co/vladotpad/looped-qwen3-huginn-fineweb
@@ -16,17 +16,21 @@ python eval.py runs/huginn/best.pt
 python viz.py                     # пересборка report.html
 ```
 
+`train.py` собирает Huginn напрямую. Остальные методы: `PlainLoopedLM`, `AntisymmetricLoopedLM`, `ControllerLoopedLM`. Чекпойнт поднимается через `LoopedLM(Config(...))` — это только сборка по полю `method` в json.
+
 ## Где что лежит
 
 | из отчёта | в коде |
 |---|---|
-| один проход Qwen3 | `methods/plain.py` |
+| Qwen3 attention / MLP | `blocks.py` |
+| гиперпараметры модели | `config.py` |
+| baseline | `methods/plain.py` |
 | Huginn | `methods/huginn.py` |
 | антисимметричный переход | `methods/antisymmetric.py` |
-| контроллер над слоями | `methods/controller.py` |
-| блоки Qwen3 и общий цикл | `model.py` |
-| данные и токенизатор | `data.py` |
-| обучение и отбор чекпойнта | `train.py` |
-| оценка на фиксированных глубинах | `eval.py` |
-| состояния, приращения, градиенты | `diag.py` |
-| сборка страницы диагностики | `viz.py` |
+| контроллер | `methods/controller.py` |
+| сборка чекпойнта по `method` | `model.py` |
+| данные | `data.py` |
+| обучение | `train.py` |
+| оценка на фиксированной глубине | `eval.py` |
+| диагностика | `diag.py` |
+| код для HTML-визуализаций | `viz.py` |

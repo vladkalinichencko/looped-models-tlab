@@ -4,12 +4,10 @@ import json
 import os
 from pathlib import Path
 
-
 STYLE = """
 :root{--ink:#18212a;--muted:#65717c;--paper:#f4f3ef;--panel:#fff;--line:#d9d6cf;--blue:#1769aa;--orange:#d16438;--green:#29845d;--purple:#7756a6;--red:#b43b4d}
 *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}header{padding:18px 24px 12px;background:#fff;border-bottom:1px solid var(--line)}h1{margin:0;font-size:22px}h2{margin:0 0 5px;font-size:19px}h3{margin:0 0 8px;font-size:15px}.controls{position:sticky;top:0;z-index:5;display:flex;gap:20px;align-items:end;padding:10px 24px;background:#fffdf9ee;backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}.controls label{display:grid;gap:3px;font-size:12px;color:var(--muted)}.controls select,.controls input{min-width:145px}.controls output{color:var(--ink);font-variant-numeric:tabular-nums}.surface{max-width:1500px;margin:auto;padding:22px 24px 50px}.section{margin-bottom:30px}.intro{margin:0 0 14px;color:var(--muted);max-width:105ch}.two{display:grid;grid-template-columns:1fr 1fr;gap:18px}.three{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.panel{min-width:0;padding:16px;background:var(--panel);border:1px solid var(--line)}.panel>svg,.panel>canvas{display:block;width:100%}.panel canvas{height:300px;image-rendering:pixelated}.plot{height:235px}.geometry{height:480px}.architecture{height:310px}.caption{margin:8px 0 0;color:var(--muted);max-width:92ch}.finding{padding:13px 15px;border-left:4px solid var(--blue);background:#edf4f9}.numbers{font-variant-numeric:tabular-nums}.links{display:flex;gap:14px;flex-wrap:wrap;margin-top:10px}a{color:var(--blue)}pre{margin:0;white-space:pre-wrap;max-height:160px;overflow:auto;background:#f5f4f0;padding:10px}.axis{stroke:#9ca5ad}.grid{stroke:#e7e4df}.line{fill:none;stroke-width:2.2}.band{opacity:.14}.small{font-size:11px}.direct{font-size:12px;font-weight:600}.empty{display:grid;place-items:center;min-height:170px;padding:20px;color:var(--muted);background:#f5f4f0;text-align:center}.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:14px 0 28px}.card{padding:12px;background:#fff;border:1px solid var(--line)}.card b{display:block;font-size:20px;font-variant-numeric:tabular-nums}.card span{color:var(--muted);font-size:12px}.screening{margin-bottom:30px}.screening-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.screening-run{padding:11px;background:#fff;border:1px solid var(--line)}.screening-run strong{display:block}.screening-run svg{display:block;width:100%;height:46px;margin:5px 0}.screening-run a{font-size:12px;margin-right:10px}@media(max-width:900px){.two,.three,.cards,.screening-grid{grid-template-columns:1fr}.controls{overflow-x:auto;padding-left:14px}.surface{padding:16px 14px 40px}.geometry{height:390px}}
 """
-
 
 SCRIPT = r"""
 const D=__DATA__, C={blue:'#1769aa',orange:'#d16438',green:'#29845d',purple:'#7756a6',red:'#b43b4d'};
@@ -102,8 +100,6 @@ function draw(){const r=runs[+run.value],s=r.diag[+checkpoint.value],step=+loop.
 run.onchange=refill;checkpoint.onchange=configure;loop.oninput=draw;refill();
 """
 
-
-
 LABELS = {
     "baseline-a100": "Qwen3, один проход",
     "huginn-a100": "Huginn, 16 циклов",
@@ -118,10 +114,8 @@ LABELS = {
     "cycle-probe-100k-r16": "Проверка глубины: 16 циклов",
 }
 
-
 def label_for(tag: str) -> str:
     return LABELS.get(tag, tag)
-
 
 def collect(root: Path, out: Path, tags=None):
     runs = {}
@@ -151,7 +145,6 @@ def collect(root: Path, out: Path, tags=None):
                           if (run / filename).exists()},
         }
     return {"runs": runs}
-
 
 def legacy_screening(root: Path, out: Path) -> str:
     names = {
@@ -202,7 +195,6 @@ def legacy_screening(root: Path, out: Path) -> str:
             "Зелёная кривая означает validation loss ниже старого baseline; эти числа не являются clean-результатом.</p>"
             f"<div class='screening-grid'>{''.join(cards)}</div></section>")
 
-
 def render(out: Path = Path("runs/report.html"), tags=None, include_legacy: bool = False):
     if tags is None:
         tags = ["baseline-clean-mac", "huginn-clean-mac"]
@@ -220,7 +212,6 @@ def render(out: Path = Path("runs/report.html"), tags=None, include_legacy: bool
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html)
     return out
-
 
 if __name__ == "__main__":
     print(render())

@@ -12,8 +12,10 @@ import torch
 import torch.nn.functional as F
 
 import data
-from model import LoopedLM
+from torch import nn
 
+from methods.huginn import HuginnLoopedLM
+from model import Config as ModelConfig
 
 @dataclass(frozen=True)
 class Config:
@@ -31,7 +33,6 @@ class Config:
     log_every: int = 20
     device: str = "auto"
 
-
 def pick_device(requested: str = "auto") -> str:
     if requested != "auto":
         return requested
@@ -41,13 +42,11 @@ def pick_device(requested: str = "auto") -> str:
         return "mps"
     return "cpu"
 
-
 def lr_at(step: int, total: int, cfg: Config) -> float:
     if step < cfg.warmup:
         return cfg.lr * (step + 1) / cfg.warmup
     progress = (step - cfg.warmup) / max(total - cfg.warmup, 1)
     return cfg.min_lr + 0.5 * (cfg.lr - cfg.min_lr) * (1 + math.cos(math.pi * progress))
-
 
 @contextmanager
 def fixed_rng(device: str, seed: int):
@@ -65,9 +64,8 @@ def fixed_rng(device: str, seed: int):
         elif device == "cuda":
             torch.cuda.set_rng_state(accelerator_state)
 
-
 @torch.no_grad()
-def evaluate(model: LoopedLM, blocks: torch.Tensor, cfg: Config) -> float:
+def evaluate(model: nn.Module, blocks: torch.Tensor, cfg: Config) -> float:
     model.eval()
     batches = itertools.islice(
         data.batches(blocks, cfg.batch_size, next(model.parameters()).device), 17)
@@ -78,12 +76,10 @@ def evaluate(model: LoopedLM, blocks: torch.Tensor, cfg: Config) -> float:
     model.train()
     return sum(losses) / len(losses)
 
-
 def write_json(path: Path, value):
     path.write_text(json.dumps(value, indent=2) + "\n")
 
-
-def train(model: LoopedLM, prepared: dict[str, torch.Tensor], manifest: Path,
+def train(model: nn.Module, prepared: dict[str, torch.Tensor], manifest: Path,
           tok, cfg: Config):
     import diag
 
@@ -179,10 +175,8 @@ def train(model: LoopedLM, prepared: dict[str, torch.Tensor], manifest: Path,
     write_json(out / "run.json", result)
     return result
 
-
 if __name__ == "__main__":
     import data
-    from model import Config as ModelConfig, LoopedLM
 
     # Финальный вариант отчёта: Huginn с 16 повторами на бюджете задания.
     tok = data.tokenizer()
@@ -190,5 +184,5 @@ if __name__ == "__main__":
     model_cfg = ModelConfig(vocab_size=len(tok), method="huginn", n_prelude=1, n_core=2,
                             n_coda=1, mean_recurrence=16, backprop_last=4)
     torch.manual_seed(0)
-    print(train(LoopedLM(model_cfg), prepared, manifest, tok,
-                TrainConfig(tag="huginn", tokens=50_000_000, eval_every=250)))
+    print(train(HuginnLoopedLM(model_cfg), prepared, manifest, tok,
+                Config(tag="huginn", tokens=50_000_000, eval_every=250)))

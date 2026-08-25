@@ -12,7 +12,6 @@ import data
 import diag
 from train import Config, fixed_rng, pick_device
 
-
 @torch.no_grad()
 def evaluate_checkpoint(checkpoint: Path, prepared, split: str = "selection",
                         recurrences=(0, 1, 2, 4, 8, 16)):
@@ -34,7 +33,6 @@ def evaluate_checkpoint(checkpoint: Path, prepared, split: str = "selection",
                                    "rows": rows}, indent=2) + "\n")
         print(rows[-1], flush=True)
     return rows
-
 
 if __name__ == "__main__":
     checkpoint = Path(sys.argv[1] if len(sys.argv) > 1 else "runs/huginn-preliminary/best.pt")

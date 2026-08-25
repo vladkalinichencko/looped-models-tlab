@@ -20,17 +20,14 @@ SELECTION = range(0, 200)
 FINAL = range(200, 2_000)
 TRAIN_START = 2_000
 
-
 @dataclass(frozen=True)
 class Config:
     seq_len: int = 512
     batch_size: int = 16
     train_tokens: int = 8_000_000
 
-
 def documents():
     return load_dataset(DATASET, name=SUBSET, split="train", streaming=True, revision=REVISION)
-
 
 def train_tokenizer(path: Path = TOKENIZER_DIR, n_docs: int = 200_000):
     from tokenizers import ByteLevelBPETokenizer
@@ -49,16 +46,13 @@ def train_tokenizer(path: Path = TOKENIZER_DIR, n_docs: int = 200_000):
     }, indent=2) + "\n")
     return tok
 
-
 def tokenizer(path: Path = TOKENIZER_DIR):
     if not (path / "tokenizer.json").exists():
         return train_tokenizer(path)
     return AutoTokenizer.from_pretrained(path)
 
-
 def tokenizer_hash(path: Path = TOKENIZER_DIR) -> str:
     return hashlib.sha256((path / "tokenizer.json").read_bytes()).hexdigest()[:12]
-
 
 def prepare(tok, cfg: Config):
     key = f"fineweb_{tokenizer_hash()}_{cfg.seq_len}_{cfg.train_tokens}"
@@ -98,12 +92,10 @@ def prepare(tok, cfg: Config):
     }, indent=2) + "\n")
     return payload, manifest
 
-
 def batches(blocks: torch.Tensor, batch_size: int, device: str):
     for start in range(0, len(blocks) - batch_size + 1, batch_size):
         batch = blocks[start:start + batch_size].to(device)
         yield batch[:, :-1], batch[:, 1:]
-
 
 if __name__ == "__main__":
     tok = tokenizer()
