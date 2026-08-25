@@ -12,6 +12,8 @@ import torch
 import torch.nn.functional as F
 
 import data
+import diag
+import viz
 from torch import nn
 
 from methods.huginn import HuginnLoopedLM
@@ -81,8 +83,6 @@ def write_json(path: Path, value):
 
 def train(model: nn.Module, prepared: dict[str, torch.Tensor], manifest: Path,
           tok, cfg: Config):
-    import diag
-
     torch.manual_seed(cfg.seed)
     device = pick_device(cfg.device)
     model.to(device).train()
@@ -166,7 +166,6 @@ def train(model: nn.Module, prepared: dict[str, torch.Tensor], manifest: Path,
                     best = selection_loss
                     torch.save(checkpoint, out / "best.pt")
                 write_json(out / "history.json", history)
-                import viz
                 viz.render(out / "report.html", [cfg.tag])
 
     result = {"status": "completed", "steps": total_steps,
@@ -176,8 +175,6 @@ def train(model: nn.Module, prepared: dict[str, torch.Tensor], manifest: Path,
     return result
 
 if __name__ == "__main__":
-    import data
-
     # Финальный вариант отчёта: Huginn с 16 повторами на бюджете задания.
     tok = data.tokenizer()
     prepared, manifest = data.prepare(tok, data.Config(train_tokens=50_000_000))

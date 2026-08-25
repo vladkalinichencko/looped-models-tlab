@@ -10,7 +10,8 @@ from pathlib import Path
 
 import torch
 from datasets import load_dataset
-from transformers import AutoTokenizer
+from tokenizers import ByteLevelBPETokenizer
+from transformers import AutoTokenizer, PreTrainedTokenizerFast
 
 DATASET = "HuggingFaceFW/fineweb"
 SUBSET = "sample-10BT"
@@ -30,9 +31,6 @@ def documents():
     return load_dataset(DATASET, name=SUBSET, split="train", streaming=True, revision=REVISION)
 
 def train_tokenizer(path: Path = TOKENIZER_DIR, n_docs: int = 200_000):
-    from tokenizers import ByteLevelBPETokenizer
-    from transformers import PreTrainedTokenizerFast
-
     chosen = itertools.islice(documents(), TRAIN_START, TRAIN_START + n_docs)
     bpe = ByteLevelBPETokenizer()
     bpe.train_from_iterator((row["text"] for row in chosen), vocab_size=16_384,
